@@ -2,10 +2,12 @@
 // Basic demo for accelerometer readings from Adafruit MPU6050
 
 #include <Adafruit_MPU6050.h>
+#include <QMC5883LCompass.h>
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
 
 Adafruit_MPU6050 mpu;
+QMC5883LCompass compass;
 
 void setup(void) {
   Serial.begin(115200);
@@ -84,6 +86,12 @@ void setup(void) {
 
   Serial.println("");
   delay(100);
+
+  mpu.setI2CBypass(true);
+
+  compass.init();
+
+  mpu.setI2CBypass(false);
 }
 
 void loop() {
@@ -91,6 +99,14 @@ void loop() {
   /* Get new sensor events with the readings */
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
+
+  mpu.setI2CBypass(true);
+
+  compass.read();
+
+  int azi = compass.getAzimuth();
+
+  // mpu.setI2CBypass(false);
 
   /* Print out the values */
   Serial.print("Acceleration X: ");
@@ -112,6 +128,10 @@ void loop() {
   Serial.print("Temperature: ");
   Serial.print(temp.temperature);
   Serial.println(" degC");
+
+  Serial.print("Azimuth: ");
+  Serial.print(azi);
+  Serial.println(" deg");
 
   Serial.println("");
   delay(500);
