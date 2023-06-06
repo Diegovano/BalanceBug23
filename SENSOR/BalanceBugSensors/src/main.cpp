@@ -9,6 +9,9 @@
 Adafruit_MPU6050 mpu;
 QMC5883LCompass compass;
 
+float filter[10] = {0, 0, 0, 0, 0};
+int filterpos = 0;
+
 void setup(void) {
   Serial.begin(115200);
   while (!Serial)
@@ -109,30 +112,56 @@ void loop() {
   // mpu.setI2CBypass(false);
 
   /* Print out the values */
-  Serial.print("Acceleration X: ");
-  Serial.print(a.acceleration.x);
-  Serial.print(", Y: ");
-  Serial.print(a.acceleration.y);
-  Serial.print(", Z: ");
-  Serial.print(a.acceleration.z);
-  Serial.println(" m/s^2");
+  // Serial.print("Acceleration X: ");
+  // Serial.print(a.acceleration.x);
+  // Serial.print(", Y: ");
+  // Serial.print(a.acceleration.y);
+  // Serial.print(", Z: ");
+  // Serial.print(a.acceleration.z);
+  // Serial.println(" m/s^2");
 
-  Serial.print("Rotation X: ");
-  Serial.print(g.gyro.x);
-  Serial.print(", Y: ");
-  Serial.print(g.gyro.y);
-  Serial.print(", Z: ");
-  Serial.print(g.gyro.z);
-  Serial.println(" rad/s");
+  // Serial.print("Rotation X: ");
+  // Serial.print(g.gyro.x);
+  // Serial.print(", Y: ");
+  // Serial.print(g.gyro.y);
+  // Serial.print(", Z: ");
+  // Serial.print(g.gyro.z);
+  // Serial.println(" rad/s");
 
-  Serial.print("Temperature: ");
-  Serial.print(temp.temperature);
-  Serial.println(" degC");
+  // Serial.print("Temperature: ");
+  // Serial.print(temp.temperature);
+  // Serial.println(" degC");
 
-  Serial.print("Azimuth: ");
-  Serial.print(azi);
-  Serial.println(" deg");
+  // Serial.print("Azimuth: ");
+  // Serial.print(azi);
+  // Serial.println(" deg");
 
-  Serial.println("");
-  delay(500);
+  // Serial.println("");
+
+  // Serial.print("Gyro X:");
+  // Serial.print(g.gyro.x);
+  // Serial.print("Accel x:");
+  // Serial.print(a.acceleration.x);
+`-90;
+  filter[++filterpos%10] = trigpitch;
+  float sum = 0;
+  for(int i = 0; i < 10; i++)
+  { 
+    sum += filter[i];
+  }
+  float filtered = sum / 10;
+
+  Serial.print("ref1:");
+  Serial.print("-45");
+  Serial.print(",ref2:");
+  Serial.print("45");
+  Serial.print(",TrigPitch:");
+  Serial.print(trigpitch);
+  Serial.print(",PitchMovAvg:");
+  Serial.print(filtered);
+  Serial.print("\n");
+  // Serial.print(",Azimuth:");
+  // Serial.println(azi);
+
+  delay(3);
 }

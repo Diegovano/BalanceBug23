@@ -1,11 +1,16 @@
 
 // Basic demo for accelerometer readings from Adafruit MPU6050
 
-#include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
+#include <Adafruit_MPU6050.h>
+#include <QMC5883LCompass.h>
 #include <Wire.h>
 
 Adafruit_MPU6050 mpu;
+QMC5883LCompass compass;
+
+float filter[10] = {0, 0, 0, 0, 0};
+int filterpos = 0;
 
 void setup(void) {
   Serial.begin(115200);
@@ -84,6 +89,12 @@ void setup(void) {
 
   Serial.println("");
   delay(100);
+
+  mpu.setI2CBypass(true);
+
+  compass.init();
+
+  mpu.setI2CBypass(false);
 }
 
 void loop() {
@@ -92,27 +103,66 @@ void loop() {
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 
+  mpu.setI2CBypass(true);
+
+  compass.read();
+
+  int azi = compass.getAzimuth();
+
+  // mpu.setI2CBypass(false);
+
   /* Print out the values */
-  Serial.print("Acceleration X: ");
-  Serial.print(a.acceleration.x);
-  Serial.print(", Y: ");
-  Serial.print(a.acceleration.y);
-  Serial.print(", Z: ");
-  Serial.print(a.acceleration.z);
-  Serial.println(" m/s^2");
+  // Serial.print("Acceleration X: ");
+  // Serial.print(a.acceleration.x);
+  // Serial.print(", Y: ");
+  // Serial.print(a.acceleration.y);
+  // Serial.print(", Z: ");
+  // Serial.print(a.acceleration.z);
+  // Serial.println(" m/s^2");
 
-  Serial.print("Rotation X: ");
-  Serial.print(g.gyro.x);
-  Serial.print(", Y: ");
-  Serial.print(g.gyro.y);
-  Serial.print(", Z: ");
-  Serial.print(g.gyro.z);
-  Serial.println(" rad/s");
+  // Serial.print("Rotation X: ");
+  // Serial.print(g.gyro.x);
+  // Serial.print(", Y: ");
+  // Serial.print(g.gyro.y);
+  // Serial.print(", Z: ");
+  // Serial.print(g.gyro.z);
+  // Serial.println(" rad/s");
 
-  Serial.print("Temperature: ");
-  Serial.print(temp.temperature);
-  Serial.println(" degC");
+  // Serial.print("Temperature: ");
+  // Serial.print(temp.temperature);
+  // Serial.println(" degC");
 
-  Serial.println("");
-  delay(500);
+  // Serial.print("Azimuth: ");
+  // Serial.print(azi);
+  // Serial.println(" deg");
+
+  // Serial.println("");
+
+  // Serial.print("Gyro X:");
+  // Serial.print(g.gyro.x);
+  // Serial.print("Accel x:");
+  // Serial.print(a.acceleration.x);
+
+  float trigpitch = acos(max(-1.0,min(a.acceleration.x/9.81,1.0)))*180/3.1415-90;
+  filter[++filterpos%10] = trigpitch;
+  float sum = 0;
+  for(int i = 0; i < 10; i++)
+  { 
+    sum += filter[i];
+  }
+  float filtered = sum / 10;
+
+  Serial.print("ref1:");
+  Serial.print("-45");
+  Serial.print(",ref2:");
+  Serial.print("45");
+  Serial.print(",Trig Pitch:");
+  Serial.print(trigpitch);
+  Serial.print(",Pitch mov avg:");
+  Serial.print(filtered);
+  Serial.print("\n");
+  // Serial.print(",Azimuth:");
+  // Serial.println(azi);
+
+  delay(5);
 }
