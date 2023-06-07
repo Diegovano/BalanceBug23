@@ -69,6 +69,8 @@ public:
 motor left(STPLpin, DIRLpin, 100, SIXT);
 motor right(STPRpin, DIRRpin, 100, SIXT);
 
+int rpm = 1;
+
 void setup() {
   Serial.begin(115200);
 
@@ -82,16 +84,25 @@ void setup() {
 }
 
 void loop() {
+  if(Serial.available())
+  {
+    rpm = Serial.read() - 48;
+    rpm = rpm <= 0 ? 1 : rpm;
+    Serial.print("Speed Set: ");
+    Serial.println(rpm);
+  }
+  
+  int delaymu = 1e6 * 60 / (rpm * 3200);
   // digitalWrite(STPRpin, HIGH);
   // digitalWrite(STPLpin, HIGH);
   left.step();
   right.step();
-  delayMicroseconds(100);
+  delayMicroseconds(delaymu / 2);
   // // // digitalWrite(STPRpin, LOW);
   // // // digitalWrite(STPLpin, LOW);
   left.setLow();
   right.setLow();
-  delayMicroseconds(100);
+  delayMicroseconds(delaymu / 2);
 
   // leftOther.runSpeed();
 
