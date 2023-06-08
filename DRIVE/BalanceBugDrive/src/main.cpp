@@ -1,14 +1,9 @@
 #include <Arduino.h>
-#include <AccelStepper.h>
-
-// AccelStepper leftOther(AccelStepper::DRIVER, 25, 26);
 
 const int STPRpin = 25;
 const int DIRRpin = 26;
 const int STPLpin = 32;
 const int DIRLpin = 33;
-
-int i = 0;
 
 enum direction
 {
@@ -60,6 +55,12 @@ public:
     else digitalWrite(dirPin, LOW);
   }
 
+  void setDir(direction dir)
+  {
+    if (dir == BCK) digitalWrite(dirPin, HIGH);
+    else digitalWrite(dirPin, LOW);
+  }
+
   void setLow()
   {
     digitalWrite(stpPin, LOW);
@@ -78,35 +79,36 @@ void setup() {
   pinMode(STPLpin, OUTPUT);
   pinMode(DIRRpin, OUTPUT);
   pinMode(DIRLpin, OUTPUT);
-
-  // leftOther.setMaxSpeed(5000);
-  // leftOther.setSpeed(5000);
 }
 
 void loop() {
   if(Serial.available())
   {
-    rpm = Serial.read() - 48;
-    rpm = rpm <= 0 ? 1 : rpm;
+    rpm = Serial.parseInt();
     Serial.print("Speed Set: ");
     Serial.println(rpm);
+    if (rpm < 0)
+    {
+      left.setDir(BCK);
+      right.setDir(BCK);
+      rpm = -rpm;
+    }
+    else if (rpm > 0)
+    {
+      left.setDir(FWD);
+      right.setDir(FWD);
+    }
   }
-  
-  int delaymu = 1e6 * 60 / (rpm * 3200);
-  // digitalWrite(STPRpin, HIGH);
-  // digitalWrite(STPLpin, HIGH);
-  left.step();
-  right.step();
-  delayMicroseconds(delaymu / 2);
-  // // // digitalWrite(STPRpin, LOW);
-  // // // digitalWrite(STPLpin, LOW);
-  left.setLow();
-  right.setLow();
-  delayMicroseconds(delaymu / 2);
+  if (rpm != 0)
+  {
+    int delaymu = 1e6 * 60 / (rpm * 3200);
 
-  // leftOther.runSpeed();
+    left.step();
+    right.step();
+    delayMicroseconds(delaymu / 2);
 
-  // left.setSpeed(((i / 500) % 200) - 100);
-  // right.setSpeed(((i / 500) % 200) - 100);
-  // Serial.println(((i++ / 500) % 200) - 100);
+    left.setLow();
+    right.setLow();
+    delayMicroseconds(delaymu / 2);
+  }
 }
