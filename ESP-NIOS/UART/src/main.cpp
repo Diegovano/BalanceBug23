@@ -1,18 +1,29 @@
 #include <Arduino.h>
 
-HardwareSerial SerialPort(2);
+HardwareSerial NIOS(2);
 
 void setup() {
 
-  SerialPort.begin(115200, SERIAL_8N1, 16, 17); 
+  NIOS.begin(115200, SERIAL_8N1, 16, 17); 
 
 
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println("Hello brothers!");
+
+  while (!NIOS.available()) {
+    delay(500);
+    Serial.println("Waiting for message from nios");
+  }
+  while (NIOS.available()){
+    Serial.println("Recevied from nios!");
+    Serial.println(NIOS.readString());
+  }
 }
 
+int i = 0;
+
 void loop() {
-  if (SerialPort.available()){
-    Serial.println(SerialPort.read());
-  }
+  NIOS.print(i++);
+  NIOS.println("Luigi");
+  delay(5000);
 }
