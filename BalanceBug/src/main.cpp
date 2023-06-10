@@ -92,7 +92,7 @@ volatile int delaymu;
 volatile long int num_delay;
 volatile bool isStep;
 
-void IRAM_ATTR motorISR()
+void IRAM_ATTR motorISR() // runs once per mu.s
 {
   if (num_delay >= delaymu / 2) {
     if (isStep){
@@ -158,7 +158,7 @@ void setup() {
   Wire.setClock(1e5);
 }
 
-float prop = 1;
+float prop = 20;
 void loop() {
   if (Serial.available())
   {
@@ -204,13 +204,12 @@ void loop() {
     right.setDir(FWD);
   }
 
-
   if (rpm != 0)
   {
     delaymu = 1e6 * 60 / (rpm * 3200);
   }
 
-  // Serial.println(rpm);
+  // Serial.println(a.acceleration.x);
 
   #if MANUAL_SPEED_CONTORL
   if(Serial.available())
