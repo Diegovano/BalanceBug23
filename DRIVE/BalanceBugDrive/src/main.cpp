@@ -1,17 +1,18 @@
 #include <Arduino.h>
 
+const TickType_t xDelay = 1 / portTICK_PERIOD_MS;
+
 #define MANUAL_SPEED_CONTORL true
-#define INTERRUPT_INTERVAL 50
 
 const int STPRpin = 25;
 const int DIRRpin = 26;
 const int STPLpin = 32;
 const int DIRLpin = 33;
 
-int i = 0;
+TaskHandle_t stepTask;
+TaskHandle_t otherTasks;
 
-// timer globals
-hw_timer_t *Timer0 = NULL;
+int i = 0;
 
 enum direction
 {
@@ -37,7 +38,7 @@ public:
     setSpeed(speedSet);
   }
 
-  void IRAM_ATTR step()
+  void step()
   {
     digitalWrite(stpPin, HIGH);
   }
@@ -64,7 +65,7 @@ public:
     else digitalWrite(dirPin, LOW);
   }
 
-  void IRAM_ATTR setLow()
+  void setLow()
   {
     digitalWrite(stpPin, LOW);
   }
@@ -73,53 +74,74 @@ public:
 motor left(STPLpin, DIRLpin, 100, SIXT);
 motor right(STPRpin, DIRRpin, 100, SIXT);
 
-volatile float rpm;
-volatile int accel;
-volatile int delaymu;
-volatile long int num_delay;
-volatile bool isStep;
+float rpm;
+int accel;
+int delaymu;
+long int num_delay;
+bool isStep;
 
-volatile SemaphoreHandle_t timerSemaphore;
-portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
-
-void IRAM_ATTR motorISR() // runs once per mu.s
+void motorCode(void *param) // runs once per mu.s
 {
-  portENTER_CRITICAL_ISR(&timerMux);
-  if (num_delay % 10 == 0 && accel != 0 ) {
-    rpm += (accel * 1e-6 * INTERRUPT_INTERVAL);
+  Serial.print("Starting Motor Code on Core ");
+  Serial.println(xPortGetCoreID());
+ 
+  while( true ) // loop to run in core
+  {
+    // vTaskDelay(1);
+    if (accel != 0 ) {
+      rpm += (accel * 1e-6 * 10);
 
-    if ( rpm > 150 && accel > 0 ) rpm = 150;
-    else if (rpm < -150 && accel < 0) rpm = -150;
-  }
-
-  if (num_delay >= delaymu / ( 2 * INTERRUPT_INTERVAL )) {
-    if (isStep){
-      left.step();
-      right.step();
-      isStep = false;
-    } else {
-      left.setLow();
-      right.setLow();
-      isStep = true;
+      if ( rpm > 150 && accel > 0 ) rpm = 150;
+      else if (rpm < -150 && accel < 0) rpm = -150;
     }
-    num_delay = 0;
-  } else num_delay++;
-  portEXIT_CRITICAL_ISR(&timerMux);
+    // Serial.println(rpm);
 
-  // Give a semaphore that we can check in the loop
-  xSemaphoreGiveFromISR(timerSemaphore, NULL);
-  // It is safe to use digitalRead/Write here if you want to toggle an output
+    left.step();
+    right.step();
+    delayMicroseconds(delaymu / 2);
+    left.setLow();
+    right.setLow();
+    delayMicroseconds(delaymu / 2);
+  }
+}
+
+void controlCode(void *param)
+{
+  Serial.print("Starting Control Code on Core ");
+  Serial.println(xPortGetCoreID());
+
+  while (true)
+  {
+    vTaskDelay(10);
+    #if MANUAL_SPEED_CONTORL
+    if(Serial.available())
+    {
+      accel = Serial.parseInt();
+      Serial.print("accel Set: ");
+      Serial.println(accel);
+    }
+    #endif
+
+    if (rpm < 0)
+    {
+      left.setDir(BCK);
+      right.setDir(BCK);
+      // rpm = -rpm;
+    }
+    else if (rpm > 0)
+    {
+      left.setDir(FWD);
+      right.setDir(FWD);
+    }
+
+    if ((int)rpm != 0)
+    {
+      delaymu = 1e6 * 60 / (abs((int)rpm) * 3200);
+    }
+  }
 }
 
 void setup() {
-
-  Timer0 = timerBegin(1, 80, true); // set timer clock to 80MHz/8 = 10Mhz
-  timerAttachInterrupt(Timer0, &motorISR, true); 
-  timerAlarmWrite(Timer0, INTERRUPT_INTERVAL, true); // trigger interrupt every 10 timer clock cycles 
-
-  // Create semaphore to inform us when the timer has fired
-  timerSemaphore = xSemaphoreCreateBinary();
-
   Serial.begin(115200);
 
   Serial.println("starting!");
@@ -129,39 +151,57 @@ void setup() {
   pinMode(DIRRpin, OUTPUT);
   pinMode(DIRLpin, OUTPUT);
 
-  rpm = 1;
-  accel = 0;
+  rpm = 0;
+  accel = 10;
 
-  timerAlarmEnable(Timer0);
+  xTaskCreatePinnedToCore(
+    controlCode,
+    "Controller Code",
+    1024,
+    NULL,
+    tskIDLE_PRIORITY,
+    &otherTasks,
+    0);
+
+  xTaskCreatePinnedToCore(
+    motorCode,
+    "MotorSteppingCode",
+    4096,
+    NULL,
+    10,
+    &stepTask,
+    1);
+    
+  vTaskDelete(NULL);
 }
 
-float prop = 20;
 void loop() {
-  #if MANUAL_SPEED_CONTORL
-  if(Serial.available())
-  {
-    accel = Serial.parseInt();
-    Serial.print("accel Set: ");
-    Serial.println(accel);
-  }
-  #endif
-
-  if (rpm < 0)
-  {
-    left.setDir(BCK);
-    right.setDir(BCK);
-    // rpm = -rpm;
-  }
-  else if (rpm > 0)
-  {
-    left.setDir(FWD);
-    right.setDir(FWD);
-  }
-
-  if ((int)rpm != 0)
-  {
-    delaymu = 1e6 * 60 / (abs((int)rpm) * 3200);
-  }
-  
-  delay(10);
+  //empty
 }
+
+// static TaskHandle_t multitask = NULL;
+
+// static TaskHandle_t Task1 = NULL;
+
+// void code(void *param){
+//   Serial.print("Task1 is running on core ");
+//   Serial.println(xPortGetCoreID());
+
+//   // delay(1000);
+//   for(;;){
+//     // Serial.println("1 HIGH");
+//     // delay(666);
+//     // Serial.println("1 LOW");
+//     // delay(666);
+//   } 
+// }
+
+// void setup() {
+//   Serial.begin(115200);
+//   Serial.println(xPortGetCoreID());
+//   xTaskCreatePinnedToCore(code, "MultiCore", 1024, NULL, 1, &Task1, 1);
+// }
+
+// void loop() {
+//   // Serial.println("hello");
+// }
