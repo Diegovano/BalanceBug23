@@ -6,18 +6,19 @@
 
 #define MANUAL_SPEED_CONTORL false
 
+const int MAX_ACCEL = 500;
+const int MAX_SPEED = 50;
+
 const int STPRpin = 25;
 const int DIRRpin = 26;
 const int STPLpin = 32;
 const int DIRLpin = 33;
 
-int i = 0;
+TaskHandle_t stepTask;
+TaskHandle_t otherTasks;
 
 Adafruit_MPU6050 mpu;
 QMC5883LCompass compass;
-
-// timer globals
-hw_timer_t *Timer0 = NULL;
 
 float filter[10] = {0, 0, 0, 0, 0};
 int filterpos = 0;
@@ -48,12 +49,7 @@ public:
 
   void step()
   {
-    if (speed != 0 && clk % (101 - speed) == 0)
-    {
-      digitalWrite(stpPin, HIGH);
-    }
-
-    clk++;
+    digitalWrite(stpPin, HIGH);
   }
 
   void setStep(microstep stepSet)
@@ -87,60 +83,121 @@ public:
 motor left(STPLpin, DIRLpin, 100, QUAR);
 motor right(STPRpin, DIRRpin, 100, QUAR);
 
-volatile int rpm;
-volatile int delaymu;
-volatile long int num_delay;
-volatile bool isStep;
+float rpm;
+int accel;
+int delaymu;
+float prop = 1000;
 
-void IRAM_ATTR motorISR() // runs once per mu.s
+void motorCode(void *param)
 {
-  if (num_delay >= delaymu / 2) {
-    if (isStep){
+  Serial.print("Starting Motor Code on Core ");
+  Serial.println(xPortGetCoreID());
+
+  while( true ) // loop to run in core
+  {
+    if (rpm != 0 && delaymu != 0)
+    {
+      if (rpm < 0)
+      {
+        left.setDir(BCK);
+        right.setDir(BCK);
+      }
+      else // rpm not equal to 0
+      {
+        left.setDir(FWD);
+        right.setDir(FWD);
+      }
       left.step();
       right.step();
-      isStep = false;
-    } else {
+      delayMicroseconds(delaymu / 2);
       left.setLow();
       right.setLow();
-      isStep = true;
+      delayMicroseconds(delaymu / 2);
     }
-    num_delay = 0;
-  } else num_delay++;
-// if (num_delay >= 7)
-// {
-//   if (isStep)
-//   {
-//     left.step();
-//     right.step();
-//     isStep = false;
-//   }
-//   else
-//   {
-//     left.setLow();
-//     right.setLow();
-//     isStep = true;
-//   }
-//   num_delay = 0;
-// }
-// else num_delay++;
-// Serial.println(num_delay);
+    else
+    {
+      vTaskDelay(1); // delay here?
+    }
+  }
+}
+
+void controlCode(void *param)
+{
+  Serial.print("Starting Control Code on Core ");
+  Serial.println(xPortGetCoreID());
+
+  while (true)
+  {
+    vTaskDelay(10);
+    if(Serial.available())
+    {
+    #if MANUAL_SPEED_CONTORL
+      accel = Serial.parseInt();
+      if (abs(accel) > MAX_ACCEL) accel *= ((float)MAX_ACCEL / abs(accel)); // convoluted way to cap acceleration magnitude.
+      Serial.print("accel Set: ");
+
+      Serial.println(accel);
+    #else
+      prop = Serial.parseInt();
+      Serial.print("prop term set: ");
+      Serial.println(prop);
+      rpm = 0;
+    #endif
+    }
+
+    sensors_event_t a, g, temp;
+    mpu.getEvent(&a, &g, &temp);
+
+    // a.acceleration.x = 9.81f;
+
+    mpu.setI2CBypass(true);
+    compass.read();
+    mpu.setI2CBypass(false);
+
+    // float trigpitch = acos(max(-1.0f, min(1.0f, a.acceleration.x/9.81f))) * 180/3.1415f - 90;
+
+    filter[++filterpos%10] = a.acceleration.x;
+    float sum = 0;
+    for(int i = 0; i < 10; i++)
+    { 
+      sum += filter[i];
+    }
+    float filtered = sum / 10;
+
+    int azi = compass.getAzimuth();
+
+    // rpm = filtered * -1 * prop;
+    accel = prop * (filtered + 0.5);
+    // Serial.println(filtered + 0.5);
+
+    if (accel != 0 ) {
+      if (abs(accel) > MAX_ACCEL) accel *= ((float)MAX_ACCEL / abs(accel));
+      float accel_step = (accel * 1e-3 * 10);
+      if ( rpm + accel_step > MAX_SPEED && accel_step > 0 ) rpm = MAX_SPEED;
+      else if (rpm + accel_step < -MAX_SPEED && accel_step < 0) rpm = -MAX_SPEED;
+      else rpm += accel_step;
+    }
+
+    // Serial.println(rpm);
+
+    if ((int)rpm != 0)
+    {
+      delaymu = 1e6 * 60 / (abs(rpm) * 3200); // cast to int
+    }
+  }
 }
 
 void setup() {
-
-  Timer0 = timerBegin(0, 80, true); // set timer clock to 80MHz/8 = 10Mhz
-  timerAttachInterrupt(Timer0, &motorISR, true); 
-  timerAlarmWrite(Timer0, 1, true); // trigger interrupt every 10 timer clock cycles 
-  timerAlarmEnable(Timer0);
-
   Serial.begin(115200);
+  Serial.println("starting!");
 
   pinMode(STPRpin, OUTPUT);
   pinMode(STPLpin, OUTPUT);
   pinMode(DIRRpin, OUTPUT);
   pinMode(DIRLpin, OUTPUT);
 
-  rpm = 1;
+  rpm = 0;
+  accel = 0;
 
   if (!mpu.begin()) Serial.println("Failed to find MPU6050 chip");
   else 
@@ -155,69 +212,31 @@ void setup() {
     mpu.setI2CBypass(false);
   }
 
-  Wire.setClock(1e5);
+  xTaskCreatePinnedToCore(
+    controlCode,
+    "Controller Code",
+    4096,
+    NULL,
+    tskIDLE_PRIORITY,
+    &otherTasks,
+    0);
+
+  delay(500);
+
+  xTaskCreatePinnedToCore(
+    motorCode,
+    "MotorSteppingCode",
+    4096,
+    NULL,
+    10,
+    &stepTask,
+    1);
+    
+  vTaskDelete(NULL);
+
 }
 
-float prop = 20;
-void loop() {
-  if (Serial.available())
-  {
-    prop = Serial.parseFloat();
-    Serial.print("Prop term set to ");
-    Serial.println(prop);
-  }
-  sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
-
-  // a.acceleration.x = 9.81f;
-
-  mpu.setI2CBypass(true);
-  compass.read();
-  mpu.setI2CBypass(false);
-
-  float trigpitch = acos(max(-1.0f, min(1.0f, a.acceleration.x/9.81f))) * 180/3.1415f - 90;
-  // float trigpitch = 20;
-
-  filter[++filterpos%10] = trigpitch;
-  float sum = 0;
-  for(int i = 0; i < 10; i++)
-  { 
-    sum += filter[i];
-  }
-  float filtered = sum / 10;
-
-  int azi = compass.getAzimuth();
-
-  rpm = filtered * -1 * prop;
-  // rpm = 60;
-  // rpm = 100;
-
-  if (rpm < 0)
-  {
-    left.setDir(BCK);
-    right.setDir(BCK);
-    rpm = -rpm;
-  }
-  else if (rpm > 0)
-  {
-    left.setDir(FWD);
-    right.setDir(FWD);
-  }
-
-  if (rpm != 0)
-  {
-    delaymu = 1e6 * 60 / (rpm * 3200);
-  }
-
-  // Serial.println(a.acceleration.x);
-
-  #if MANUAL_SPEED_CONTORL
-  if(Serial.available())
-  {
-    rpm = Serial.parseInt();
-    Serial.print("Speed Set: ");
-    Serial.println(rpm);
-  }
-  #endif
-  
+void loop() 
+{
+  // empty
 }

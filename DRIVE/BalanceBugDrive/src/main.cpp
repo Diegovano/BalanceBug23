@@ -5,7 +5,6 @@ const int MAX_ACCEL = 250;
 
 const TickType_t xDelay = 1 / portTICK_PERIOD_MS;
 
-
 const int STPRpin = 25;
 const int DIRRpin = 26;
 const int STPLpin = 32;
@@ -13,8 +12,6 @@ const int DIRLpin = 33;
 
 TaskHandle_t stepTask;
 TaskHandle_t otherTasks;
-
-int i = 0;
 
 enum direction
 {
@@ -79,8 +76,6 @@ motor right(STPRpin, DIRRpin, 100, SIXT);
 float rpm;
 int accel;
 int delaymu;
-long int num_delay;
-bool isStep;
 
 void motorCode(void *param) // runs once per mu.s
 {
@@ -95,7 +90,6 @@ void motorCode(void *param) // runs once per mu.s
       {
         left.setDir(BCK);
         right.setDir(BCK);
-        // rpm = -rpm;
       }
       else // rpm not equal to 0
       {
