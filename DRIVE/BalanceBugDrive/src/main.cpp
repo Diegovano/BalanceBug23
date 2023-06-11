@@ -1,8 +1,10 @@
 #include <Arduino.h>
+#define MANUAL_SPEED_CONTORL true
+
+const int MAX_ACCEL = 250;
 
 const TickType_t xDelay = 1 / portTICK_PERIOD_MS;
 
-#define MANUAL_SPEED_CONTORL true
 
 const int STPRpin = 25;
 const int DIRRpin = 26;
@@ -84,24 +86,33 @@ void motorCode(void *param) // runs once per mu.s
 {
   Serial.print("Starting Motor Code on Core ");
   Serial.println(xPortGetCoreID());
- 
+
   while( true ) // loop to run in core
   {
-    // vTaskDelay(1);
-    if (accel != 0 ) {
-      rpm += (accel * 1e-6 * 10);
-
-      if ( rpm > 150 && accel > 0 ) rpm = 150;
-      else if (rpm < -150 && accel < 0) rpm = -150;
+    if (rpm != 0 && delaymu != 0)
+    {
+      if (rpm < 0)
+      {
+        left.setDir(BCK);
+        right.setDir(BCK);
+        // rpm = -rpm;
+      }
+      else // rpm not equal to 0
+      {
+        left.setDir(FWD);
+        right.setDir(FWD);
+      }
+      left.step();
+      right.step();
+      delayMicroseconds(delaymu / 2);
+      left.setLow();
+      right.setLow();
+      delayMicroseconds(delaymu / 2);
     }
-    // Serial.println(rpm);
-
-    left.step();
-    right.step();
-    delayMicroseconds(delaymu / 2);
-    left.setLow();
-    right.setLow();
-    delayMicroseconds(delaymu / 2);
+    else
+    {
+      vTaskDelay(1); // delay here?
+    }
   }
 }
 
@@ -117,26 +128,26 @@ void controlCode(void *param)
     if(Serial.available())
     {
       accel = Serial.parseInt();
+      if (abs(accel) > MAX_ACCEL) accel *= ((float)MAX_ACCEL / abs(accel)); // convoluted way to cap acceleration magnitude.
       Serial.print("accel Set: ");
+
       Serial.println(accel);
     }
     #endif
 
-    if (rpm < 0)
-    {
-      left.setDir(BCK);
-      right.setDir(BCK);
-      // rpm = -rpm;
+    if (accel != 0 ) {
+      if (abs(accel) > MAX_ACCEL) accel *= ((float)MAX_ACCEL / abs(accel));
+      float accel_step = (accel * 1e-3 * 10);
+      if ( rpm + accel_step > 150 && accel_step > 0 ) rpm = 150;
+      else if (rpm + accel_step < -150 && accel_step < 0) rpm = -150;
+      else rpm += accel_step;
     }
-    else if (rpm > 0)
-    {
-      left.setDir(FWD);
-      right.setDir(FWD);
-    }
+
+    Serial.println(rpm);
 
     if ((int)rpm != 0)
     {
-      delaymu = 1e6 * 60 / (abs((int)rpm) * 3200);
+      delaymu = 1e6 * 60 / (abs(rpm) * 3200); // cast to int
     }
   }
 }
@@ -151,8 +162,8 @@ void setup() {
   pinMode(DIRRpin, OUTPUT);
   pinMode(DIRLpin, OUTPUT);
 
-  rpm = 0;
-  accel = 10;
+  rpm = 60;
+  accel = 0;
 
   xTaskCreatePinnedToCore(
     controlCode,
@@ -162,6 +173,8 @@ void setup() {
     tskIDLE_PRIORITY,
     &otherTasks,
     0);
+
+  delay(500);
 
   xTaskCreatePinnedToCore(
     motorCode,
