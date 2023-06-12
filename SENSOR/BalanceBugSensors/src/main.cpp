@@ -109,6 +109,8 @@ void loop() {
 
   int azi = compass.getAzimuth();
 
+  float trigpitch = acos(max(-1.0f, min(1.0f, a.acceleration.x/9.81f))) * 180/3.1415f - 90;
+
   // mpu.setI2CBypass(false);
 
   /* Print out the values */
@@ -142,7 +144,6 @@ void loop() {
   // Serial.print(g.gyro.x);
   // Serial.print("Accel x:");
   // Serial.print(a.acceleration.x);
-`-90;
   filter[++filterpos%10] = trigpitch;
   float sum = 0;
   for(int i = 0; i < 10; i++)
@@ -153,12 +154,14 @@ void loop() {
 
   Serial.print("ref1:");
   Serial.print("-45");
-  Serial.print(",ref2:");
+  Serial.print("\tref2:");
   Serial.print("45");
-  Serial.print(",TrigPitch:");
+  Serial.print("\tTrigPitch:");
   Serial.print(trigpitch);
-  Serial.print(",PitchMovAvg:");
+  Serial.print("\tPitchMovAvg:");
   Serial.print(filtered);
+  Serial.print("\tGravTorque:");
+  Serial.print(a.acceleration.x);
   Serial.print("\n");
   // Serial.print(",Azimuth:");
   // Serial.println(azi);

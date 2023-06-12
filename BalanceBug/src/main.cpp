@@ -1,9 +1,13 @@
 #include <Arduino.h>
-#define MANUAL_SPEED_CONTORL true
+#include <Adafruit_MPU6050.h>
+#include <QMC5883LCompass.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
 
-const int MAX_ACCEL = 250;
+#define MANUAL_SPEED_CONTORL false
 
-const TickType_t xDelay = 1 / portTICK_PERIOD_MS;
+const int MAX_ACCEL = 500;
+const int MAX_SPEED = 50;
 
 const int STPRpin = 25;
 const int DIRRpin = 26;
@@ -12,6 +16,12 @@ const int DIRLpin = 33;
 
 TaskHandle_t stepTask;
 TaskHandle_t otherTasks;
+
+Adafruit_MPU6050 mpu;
+QMC5883LCompass compass;
+
+float filter[10] = {0, 0, 0, 0, 0};
+int filterpos = 0;
 
 enum direction
 {
@@ -70,14 +80,15 @@ public:
   }
 };
 
-motor left(STPLpin, DIRLpin, 100, SIXT);
-motor right(STPRpin, DIRRpin, 100, SIXT);
+motor left(STPLpin, DIRLpin, 100, QUAR);
+motor right(STPRpin, DIRRpin, 100, QUAR);
 
 float rpm;
 int accel;
 int delaymu;
+float prop = 1000;
 
-void motorCode(void *param) // runs once per mu.s
+void motorCode(void *param)
 {
   Serial.print("Starting Motor Code on Core ");
   Serial.println(xPortGetCoreID());
@@ -118,26 +129,56 @@ void controlCode(void *param)
   while (true)
   {
     vTaskDelay(10);
-    #if MANUAL_SPEED_CONTORL
     if(Serial.available())
     {
+    #if MANUAL_SPEED_CONTORL
       accel = Serial.parseInt();
       if (abs(accel) > MAX_ACCEL) accel *= ((float)MAX_ACCEL / abs(accel)); // convoluted way to cap acceleration magnitude.
       Serial.print("accel Set: ");
 
       Serial.println(accel);
-    }
+    #else
+      prop = Serial.parseInt();
+      Serial.print("prop term set: ");
+      Serial.println(prop);
+      rpm = 0;
     #endif
+    }
+
+    sensors_event_t a, g, temp;
+    mpu.getEvent(&a, &g, &temp);
+
+    // a.acceleration.x = 9.81f;
+
+    mpu.setI2CBypass(true);
+    compass.read();
+    mpu.setI2CBypass(false);
+
+    // float trigpitch = acos(max(-1.0f, min(1.0f, a.acceleration.x/9.81f))) * 180/3.1415f - 90;
+
+    filter[++filterpos%10] = a.acceleration.x;
+    float sum = 0;
+    for(int i = 0; i < 10; i++)
+    { 
+      sum += filter[i];
+    }
+    float filtered = sum / 10;
+
+    int azi = compass.getAzimuth();
+
+    // rpm = filtered * -1 * prop;
+    accel = prop * (filtered + 0.5);
+    // Serial.println(filtered + 0.5);
 
     if (accel != 0 ) {
       if (abs(accel) > MAX_ACCEL) accel *= ((float)MAX_ACCEL / abs(accel));
       float accel_step = (accel * 1e-3 * 10);
-      if ( rpm + accel_step > 150 && accel_step > 0 ) rpm = 150;
-      else if (rpm + accel_step < -150 && accel_step < 0) rpm = -150;
+      if ( rpm + accel_step > MAX_SPEED && accel_step > 0 ) rpm = MAX_SPEED;
+      else if (rpm + accel_step < -MAX_SPEED && accel_step < 0) rpm = -MAX_SPEED;
       else rpm += accel_step;
     }
 
-    Serial.println(rpm);
+    // Serial.println(rpm);
 
     if ((int)rpm != 0)
     {
@@ -148,7 +189,6 @@ void controlCode(void *param)
 
 void setup() {
   Serial.begin(115200);
-
   Serial.println("starting!");
 
   pinMode(STPRpin, OUTPUT);
@@ -156,13 +196,26 @@ void setup() {
   pinMode(DIRRpin, OUTPUT);
   pinMode(DIRLpin, OUTPUT);
 
-  rpm = 60;
+  rpm = 0;
   accel = 0;
+
+  if (!mpu.begin()) Serial.println("Failed to find MPU6050 chip");
+  else 
+  {
+    Serial.println("MPU6050 Found!");
+    mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+    mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+
+    mpu.setI2CBypass(true);
+    compass.init();
+    mpu.setI2CBypass(false);
+  }
 
   xTaskCreatePinnedToCore(
     controlCode,
     "Controller Code",
-    1024,
+    4096,
     NULL,
     tskIDLE_PRIORITY,
     &otherTasks,
@@ -180,35 +233,10 @@ void setup() {
     1);
     
   vTaskDelete(NULL);
+
 }
 
-void loop() {
-  //empty
+void loop() 
+{
+  // empty
 }
-
-// static TaskHandle_t multitask = NULL;
-
-// static TaskHandle_t Task1 = NULL;
-
-// void code(void *param){
-//   Serial.print("Task1 is running on core ");
-//   Serial.println(xPortGetCoreID());
-
-//   // delay(1000);
-//   for(;;){
-//     // Serial.println("1 HIGH");
-//     // delay(666);
-//     // Serial.println("1 LOW");
-//     // delay(666);
-//   } 
-// }
-
-// void setup() {
-//   Serial.begin(115200);
-//   Serial.println(xPortGetCoreID());
-//   xTaskCreatePinnedToCore(code, "MultiCore", 1024, NULL, 1, &Task1, 1);
-// }
-
-// void loop() {
-//   // Serial.println("hello");
-// }
