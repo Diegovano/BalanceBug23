@@ -31,15 +31,39 @@ void setup() {
   }
 
   delay(500);
-  NIOS.printf("E%08x\n", 0x2d0);
+
+  // BLUE
+  // NIOS.printf("E%08x\n", 0x400);
+  // delay(50);
+  // NIOS.printf("G%08x\n", 0x0);
+  // delay(50);
+  // NIOS.printf("H%08x\n", 0x0000FF);
+  // delay(50);
+  // NIOS.printf("T%08x\n", 0x2db1);
+  // delay(50);
+  // NIOS.printf("A%08x\n", 0x10);
+
+  // RED
+  // NIOS.printf("E%08x\n", 0x3D0);
+  // delay(50);
+  // NIOS.printf("G%08x\n", 0x0);
+  // delay(50);
+  // NIOS.printf("H%08x\n", 0xFF0000);
+  // delay(50);
+  // NIOS.printf("T%08x\n", 0x1e3d);
+  // delay(50);
+  // NIOS.printf("A%08x\n", 0x10);
+
+  // YELLOW
+  NIOS.printf("E%08x\n", 0xd80);
   delay(50);
   NIOS.printf("G%08x\n", 0x0);
   delay(50);
-  NIOS.printf("H%08x\n", 0x0000FF);
+  NIOS.printf("H%08x\n", 0xEEFF00);
   delay(50);
-  NIOS.printf("T%08x\n", 0x2ddd);
+  NIOS.printf("T%08x\n", 0x1d15);
   delay(50);
-  NIOS.printf("A%08x\n", 0x5);
+  NIOS.printf("A%08x\n", 0x10);
 
 
 }
