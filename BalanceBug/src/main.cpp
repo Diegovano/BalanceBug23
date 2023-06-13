@@ -210,14 +210,14 @@ void controlCode(void *param)
     float trigPitch = acos(max(-1.0, min(1.0, gravTorque/9.81))) * 180/3.1415 - 90;
     float compPitch = -(0.1 * (compPitch + gyroPitch) + 0.9 * accelPitch);
 
-    Serial.print("ref1:");
-    Serial.print("-90");
-    Serial.print("\tref2:");
-    Serial.print("90");
-    Serial.print("\ttrig:");
-    Serial.print(trigPitch);
-    Serial.print("\tcomp:");
-    Serial.println(compPitch);
+    // Serial.print("ref1:");
+    // Serial.print("-90");
+    // Serial.print("\tref2:");
+    // Serial.print("90");
+    // Serial.print("\ttrig:");
+    // Serial.print(trigPitch);
+    // Serial.print("\tcomp:");
+    // Serial.println(compPitch);
 
     // int azi = compass.getAzimuth();
 
@@ -236,22 +236,22 @@ void controlCode(void *param)
 
     accel = u0;
 
-    // // Serial.print("Pitch Setpoint: ");
-    // // Serial.print(pitchSetpoint);
-    // Serial.print("TrigPitch:");
-    // Serial.print(trigpitch);
-    // // Serial.print("\tPitch Error: ");
-    // // Serial.print(pitchError);
-    // Serial.print("\tRateSetpoint:");
-    // Serial.print(rateSetpoint);
-    // Serial.print("\tRate:");
-    // Serial.print(rate);
-    // Serial.print("\tRateError:");
-    // Serial.print(rateError);
-    // Serial.print("\tAccel:");
-    // Serial.print(accel);
-    // Serial.print("\tRPM:");
-    // Serial.println(rpm);
+    // Serial.print("Pitch Setpoint: ");
+    // Serial.print(pitchSetpoint);
+    Serial.print("TrigPitch:");
+    Serial.print(trigPitch);
+    // Serial.print("\tPitch Error: ");
+    // Serial.print(pitchError);
+    Serial.print("\tRateSetpoint:");
+    Serial.print(rateSetpoint);
+    Serial.print("\tRate:");
+    Serial.print(rate);
+    Serial.print("\tRateError:");
+    Serial.print(rateError);
+    Serial.print("\tAccel:");
+    Serial.print(accel);
+    Serial.print("\tRPM:");
+    Serial.println(rpm);
 
     if (accel != 0 ) {
       if (abs(accel) > MAX_ACCEL) accel *= ((float)MAX_ACCEL / abs(accel));
