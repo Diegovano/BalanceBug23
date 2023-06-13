@@ -46,18 +46,18 @@ void setup() {
   Serial.println("ESP-32\nImperial College London EE2 Project Magenta");
 
   // WiFi Setup
-  // pinMode(LED_BUILTIN, OUTPUT);
-  // WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  // Serial.println("Connecting to Wi-Fi");
+  pinMode(LED_BUILTIN, OUTPUT);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.println("Connecting to Wi-Fi");
 
-  // while (WiFi.status() != WL_CONNECTED) {
-  //   Serial.println(".");
-  //   digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-  //   delay(500);
-  // }
-  // Serial.print("Connected to WiFi as");
-  // Serial.println(WiFi.localIP());
-  // digitalWrite(LED_BUILTIN, HIGH);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.println(".");
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+    delay(500);
+  }
+  Serial.print("Connected to WiFi as");
+  Serial.println(WiFi.localIP());
+  digitalWrite(LED_BUILTIN, HIGH);
 
   // NIOS SETUP
   pinMode(NIOS_RESET_PIN, OUTPUT);
@@ -78,10 +78,7 @@ int headings[3];
 
 void loop() {
 
-  int found = findBeacons(headings);
-
-  Serial.printf("Found %i beacons. R %i Y %i B %i\n", found, headings[0], headings[1], headings[2]);
-  memset(headings, 0, sizeof(headings));
+  cameraSpin(45);
   delay(1000);
 }
 
@@ -159,13 +156,15 @@ int hex2int(char byte) {
 }
 
 // function that polls the nios to check for the presence of beacons
-// returns the number of found beacons and writes the pixel value to the array param
+// writes the pixel value to the array param
+// return 3 bits where each bit represents the red, yellow blue (100) means only red was found
 int findBeacons(int headings[3]){
   int found = 0;
   int pixel = 0;
 
 
   for(int i = 0; i < 3; i++){
+    found = found << 1; // shift left by 1
     char *colour = (char*) malloc(20);
     if (i == 0) strcpy(colour, "red");
     else if (i == 1) strcpy(colour, "yellow");
@@ -198,7 +197,7 @@ int findBeacons(int headings[3]){
       in = NIOS.read(); // 0 or 1 based on if the beacons was found
 
       if (in == '1'){
-        found++;
+        found = found | 1;
         #if DEBUG
         Serial.printf("%s Beacon Found ", colour);
         #endif
@@ -241,6 +240,7 @@ int findBeacons(int headings[3]){
     }
 
     free(colour);
+    
   }
   return found;
 }
@@ -257,13 +257,42 @@ void cameraSpin(double angleStep){
   
   // array that contains the pixel value of the found pixels
   // 0 is red, 1 yellow, 2 blue
-  int headings[3]; 
+  int pixels[3];
+  double angles[3]; 
+  bool founds[3];
+
+  for (int i = 0; i < 3; i++){
+    founds[i] = 0;
+    pixels[i] = 0;
+    angles[i] = 0;
+  }
 
   // step through that many steps and measure lights
   for (int i = 0; i < num_turns; i++){
 
-    found_beacons += findBeacons(headings);
+    int found = findBeacons(pixels);
 
+    if (found & 0b100) {
+      founds[0] = 1;
+      angles[0] = curr_angle;
+      Serial.print("found red ");
+      found_beacons++;
+    }
+    if (found & 0b010) {
+      founds[1] = 1;
+      angles[1] = curr_angle;
+      Serial.print("found yellow ");
+      found_beacons++;
+    }
+    if (found & 0b001) {
+      founds[2] = 1;
+      angles[2] = curr_angle;
+      Serial.print("found blue ");
+      found_beacons++;
+    }
+
+    Serial.printf("Found beacons %x: R %i Y %i B %i\n", found, pixels[0], pixels[1], pixels[2]);
+    Serial.printf("Curre angle %.2f\n", curr_angle);
     // all beacons have been found
     if (found_beacons == 3) break;
 
@@ -271,6 +300,12 @@ void cameraSpin(double angleStep){
     curr_angle += angleStep;
   }
 
+  for (int i = 0; i < 3; i++){
+    Serial.printf("%x, %i, %.2f\n", founds[i], pixels[i], angles[i]);
+  }
+
   // return to 0 position
   turnAngle(-curr_angle);
+
+  
 }
