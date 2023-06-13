@@ -6,8 +6,8 @@
 
 #define MANUAL_SPEED_CONTORL false
 
-const int MAX_ACCEL = 1000;
-const int MAX_SPEED = 150;
+const int MAX_ACCEL = 500;
+const int MAX_SPEED = 50;
 
 const int STPRpin = 25;
 const int DIRRpin = 26;
@@ -20,16 +20,18 @@ TaskHandle_t otherTasks;
 Adafruit_MPU6050 mpu;
 QMC5883LCompass compass;
 
-double filter0[10] = {0, 0, 0, 0, 0};
-double filter1[10] = {0, 0, 0, 0, 0};
+unsigned long time123;
+
+float filter0[10] = {0, 0, 0, 0, 0};
+float filter1[10] = {0, 0, 0, 0, 0};
 int filterpos = 0;
 
-double e0, e1, e2, u0, u1 = 0, e_integration, delta_u;
-double kp, ki, kd;
-double Ts;
-double u_max, u_min;
+float e0, e1, e2, u0, u1 = 0, e_integration, delta_u;
+float kp, ki, kd;
+float Ts;
+float u_max, u_min;
 
-void pid(double e){
+void pid(float e){
     e0 = e;
     e_integration = e0;
     
@@ -111,10 +113,10 @@ public:
 motor left(STPLpin, DIRLpin, 100, QUAR);
 motor right(STPRpin, DIRRpin, 100, QUAR);
 
-double rpm;
-int accel;
+float rpm;
+float accel;
 int delaymu;
-double prop = 1;
+float prop = 1;
 
 void motorCode(void *param)
 {
@@ -156,12 +158,14 @@ void controlCode(void *param)
 
   while (true)
   {
+    // Serial.println(millis() - time123);
+    time123 = millis();
     // vTaskDelay(1);
     if(Serial.available())
     {
     #if MANUAL_SPEED_CONTORL
       accel = Serial.parseInt();
-      if (abs(accel) > MAX_ACCEL) accel *= ((double)MAX_ACCEL / abs(accel)); // convoluted way to cap acceleration magnitude.
+      if (abs(accel) > MAX_ACCEL) accel *= ((float)MAX_ACCEL / abs(accel)); // convoluted way to cap acceleration magnitude.
       Serial.print("accel Set: ");
 
       Serial.println(accel);
@@ -182,15 +186,15 @@ void controlCode(void *param)
     // compass.read();
     // mpu.setI2CBypass(false);
 
-    // double trigpitch = acos(max(-1.0f, min(1.0f, a.acceleration.x/9.81f))) * 180/3.1415f - 90;
+    // float trigpitch = acos(max(-1.0f, min(1.0f, a.acceleration.x/9.81f))) * 180/3.1415f - 90;
 
     filter0[filterpos%10] = a.acceleration.x;
-    double sum = 0;
+    float sum = 0;
     for(int i = 0; i < 10; i++)
     { 
       sum += filter0[i];
     }
-    double gravTorque = sum / 10;
+    float gravTorque = sum / 10;
     
     filter1[++filterpos%10] = g.gyro.x;
     sum = 0;
@@ -198,47 +202,60 @@ void controlCode(void *param)
     { 
       sum += filter1[i];
     }
-    double rate = sum + 1.01f;
+    float rate = sum + 1.01f;
 
-    double trigpitch = acos(max(-1.0, min(1.0, gravTorque/9.81))) * 180/3.1415 - 90;
+    float accelPitch = atan(a.acceleration.x/a.acceleration.z)*180/PI;
+    float gyroPitch = g.gyro.x * 0.004;
+
+    float trigPitch = acos(max(-1.0, min(1.0, gravTorque/9.81))) * 180/3.1415 - 90;
+    float compPitch = -(0.1 * (compPitch + gyroPitch) + 0.9 * accelPitch);
+
+    Serial.print("ref1:");
+    Serial.print("-90");
+    Serial.print("\tref2:");
+    Serial.print("90");
+    Serial.print("\ttrig:");
+    Serial.print(trigPitch);
+    Serial.print("\tcomp:");
+    Serial.println(compPitch);
 
     // int azi = compass.getAzimuth();
 
-    double pitchSetpoint = 0;
-    double pitchError = pitchSetpoint - trigpitch;
+    float pitchSetpoint = 0;
+    float pitchError = pitchSetpoint - trigPitch;
 
-    double rateSetpoint = pitchError * 10;
+    float rateSetpoint = pitchError * 0.1;
 
     int RATE_SP_SAT = 50;
     // pitch rate set point sat
     rateSetpoint = abs(rateSetpoint) > RATE_SP_SAT ? abs(rateSetpoint) / RATE_SP_SAT : rateSetpoint; 
 
-    double rateError = rateSetpoint - rate;
+    float rateError = rateSetpoint - rate;
 
     pid(rateError);
 
     accel = u0;
 
-    // Serial.print("Pitch Setpoint: ");
-    // Serial.print(pitchSetpoint);
-    Serial.print("\tTrig Pitch: ");
-    Serial.print(trigpitch);
-    // Serial.print("\tPitch Error: ");
-    // Serial.print(pitchError);
-    Serial.print("\tRate Setpoint: ");
-    Serial.print(rateSetpoint);
-    Serial.print("\tRate: ");
-    Serial.print(rate);
-    Serial.print("\tRate Error: ");
-    Serial.print(rateError);
-    Serial.print("\tAccel: ");
-    Serial.print(accel);
-    Serial.print("\tRPM: ");
-    Serial.println(rpm);
+    // // Serial.print("Pitch Setpoint: ");
+    // // Serial.print(pitchSetpoint);
+    // Serial.print("TrigPitch:");
+    // Serial.print(trigpitch);
+    // // Serial.print("\tPitch Error: ");
+    // // Serial.print(pitchError);
+    // Serial.print("\tRateSetpoint:");
+    // Serial.print(rateSetpoint);
+    // Serial.print("\tRate:");
+    // Serial.print(rate);
+    // Serial.print("\tRateError:");
+    // Serial.print(rateError);
+    // Serial.print("\tAccel:");
+    // Serial.print(accel);
+    // Serial.print("\tRPM:");
+    // Serial.println(rpm);
 
     if (accel != 0 ) {
-      if (abs(accel) > MAX_ACCEL) accel *= ((double)MAX_ACCEL / abs(accel));
-      double accel_step = (accel * 1e-3 * 10);
+      if (abs(accel) > MAX_ACCEL) accel *= ((float)MAX_ACCEL / abs(accel));
+      float accel_step = (accel * 1e-3 * 10);
       if ( rpm + accel_step > MAX_SPEED && accel_step > 0 ) rpm = MAX_SPEED;
       else if (rpm + accel_step < -MAX_SPEED && accel_step < 0) rpm = -MAX_SPEED;
       else rpm += accel_step;
@@ -265,11 +282,11 @@ void setup() {
   rpm = 0;
   accel = 0;
 
-  Ts = 0.001;
+  Ts = 0.004;
 
-  kp = 50;
+  kp = 1;
   ki = 100;
-  kd = 0.1;
+  kd = 0;
 
   if (!mpu.begin()) Serial.println("Failed to find MPU6050 chip");
   else 
