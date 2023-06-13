@@ -9,8 +9,13 @@
 #define HTTP_PORT "3001"
 
 const char* serverUrl = "http://54.82.44.87:3001/beacon";
+const char* triangulationUrl = "http://54.82.44.87:3001/api/flag";
 
 const size_t bufferSize = JSON_OBJECT_SIZE(6);
+const unsigned long pollingInterval = 100;
+
+
+
 
 void setup() {
   // Wifi connection:
@@ -66,6 +71,8 @@ void loop() {
 
   WiFiClient client;
   HTTPClient http;
+
+  // Sending beacon values to server 
   http.begin(requestUrl);
   http.addHeader("Content-Type", "application/json");
   int httpResponseCode = http.GET();
@@ -77,9 +84,22 @@ void loop() {
   } else {
     Serial.println("Error sending GET request");
   }
-
   http.end();
-
   // Wait before sending the next request
-  delay(5000);
+  delay(500);
+
+  http.begin(triangulationUrl);
+  int httpResponseCode = http.GET();
+  if (httpResponseCode == HTTP_CODE_OK){
+    String response = http.getString();
+    int flagValue = response.toInt();
+    Serial.print("Flag value: ");
+    Serial.println(flagValue);
+  } else {
+    Serial.print("Error: ");
+    Serial.println(httpResponseCode);
+  }
+  http.end();
+  delay(pollingInterval);
+
 }
