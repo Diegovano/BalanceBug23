@@ -6,13 +6,15 @@
 
 #define MANUAL_SPEED_CONTORL false
 
-const int MAX_ACCEL = 500;
-const int MAX_SPEED = 50;
+const int MAX_ACCEL = 1000;
+const int MAX_SPEED = 150;
 
 const int STPRpin = 25;
 const int DIRRpin = 26;
 const int STPLpin = 32;
 const int DIRLpin = 33;
+
+float kp, ki, kd, kpp;
 
 TaskHandle_t stepTask;
 TaskHandle_t otherTasks;
@@ -22,36 +24,80 @@ QMC5883LCompass compass;
 
 unsigned long time123;
 
-float filter0[10] = {0, 0, 0, 0, 0};
-float filter1[10] = {0, 0, 0, 0, 0};
+double filter0[10] = {0, 0, 0, 0, 0};
+double filter1[10] = {0, 0, 0, 0, 0};
 int filterpos = 0;
 
-float e0, e1, e2, u0, u1 = 0, e_integration, delta_u;
-float kp, ki, kd;
-float Ts;
-float u_max, u_min;
+unsigned long lastTime;
 
-void pid(float e){
-    e0 = e;
-    e_integration = e0;
-    
-    //anti_windup
-    if(u1 >= u_max){
-        e_integration = 0;
-    }
-    else if (u1 <= u_min)
+class PID
+{
+private:
+
+  float _kp;
+  float _ki;
+  float _kd;
+  float e0 = 0, e1 = 0, e2 = 0;
+  float u0 = 0, u1 = 0;
+  float _setpoint;
+  float lastTime;
+public:
+  PID(float kp, float ki, float kd, float setpoint)
+  {
+    _kp = kp;
+    _ki = ki;
+    _kd = kd;
+    _setpoint = setpoint;
+  }
+
+  float compute(float value, float dt = 0)
+  {
+    if (dt == 0)
     {
-        e_integration = 0;
+      if (lastTime == 0)
+      {
+        lastTime = millis();
+        // dt = lastTime; // use 0 for this time
+      }
+      unsigned long now = millis();
+      dt = lastTime - now;
+      lastTime = now;
     }
-    
-    //incremental PID
-    delta_u = kp*(e0-e1) + ki*Ts*e_integration + kd/Ts*(e0 - 2*e1 + e2);
-    u0 = u1 + delta_u;
+
+    e0 = _setpoint - value;
+    float delta_u = _kp*(e0 - e1) + _ki*dt*e0 + _kd/dt*(e0 - 2*e1 + e2);
+    u0 = delta_u + u1;
 
     e2 = e1;
     e1 = e0;
     u1 = u0;
-}
+
+    return u1;
+  }
+
+  void setgain(float kp, float ki, float kd)
+  {
+    _kp = kp;
+    _ki = ki;
+    _kd = kd;
+
+    e0 = 0, e1 = 0, e2 = 0, u0 = 0, u1 = 0;
+
+    Serial.print("Set PID values to: ");
+    Serial.print(kp);
+    Serial.print(", ");
+    Serial.print(ki);
+    Serial.print(", ");
+    Serial.println(kd);
+  }
+
+  void setSetpoint(float setpoint)
+  {
+    _setpoint = setpoint;
+  }
+};
+
+PID *innerController;
 
 enum direction
 {
@@ -113,10 +159,9 @@ public:
 motor left(STPLpin, DIRLpin, 100, QUAR);
 motor right(STPRpin, DIRRpin, 100, QUAR);
 
-float rpm;
-float accel;
+double rpm;
+double accel;
 int delaymu;
-float prop = 1;
 
 void motorCode(void *param)
 {
@@ -156,6 +201,8 @@ void controlCode(void *param)
   Serial.print("Starting Control Code on Core ");
   Serial.println(xPortGetCoreID());
 
+  int fake_bandwidth_watchdog = 0;
+
   while (true)
   {
     // Serial.println(millis() - time123);
@@ -170,10 +217,16 @@ void controlCode(void *param)
 
       Serial.println(accel);
     #else
-      kp = Serial.parseInt();
+      kp = Serial.parseFloat();
+      ki = Serial.parseFloat();
+      kd = Serial.parseFloat();
+      kpp = Serial.parseFloat();
       Serial.print("prop term set: ");
-      Serial.println(prop);
+      Serial.println(kp);
       rpm = 0;
+      accel = 0;
+      
+      innerController->setgain(kp, ki, kd);
     #endif
     }
 
@@ -186,15 +239,15 @@ void controlCode(void *param)
     // compass.read();
     // mpu.setI2CBypass(false);
 
-    // float trigpitch = acos(max(-1.0f, min(1.0f, a.acceleration.x/9.81f))) * 180/3.1415f - 90;
+    // double trigpitch = acos(max(-1.0f, min(1.0f, a.acceleration.x/9.81f))) * 180/3.1415f - 90;
 
     filter0[filterpos%10] = a.acceleration.x;
-    float sum = 0;
+    double sum = 0;
     for(int i = 0; i < 10; i++)
     { 
       sum += filter0[i];
     }
-    float gravTorque = sum / 10;
+    double gravTorque = sum / 10;
     
     filter1[++filterpos%10] = g.gyro.x;
     sum = 0;
@@ -202,13 +255,14 @@ void controlCode(void *param)
     { 
       sum += filter1[i];
     }
-    float rate = sum + 1.01f;
+    double rate = sum + 1.01f;
 
-    float accelPitch = atan(a.acceleration.x/a.acceleration.z)*180/PI;
-    float gyroPitch = g.gyro.x * 0.004;
+    double accelPitch = atan(a.acceleration.x/a.acceleration.z)*180/PI;
+    double accelPitch2 = -atan2(a.acceleration.x, sqrt(a.acceleration.z*a.acceleration.z + a.acceleration.y*a.acceleration.y))*180/PI;
+    double gyroPitch = g.gyro.x * 0.004;
 
-    float trigPitch = acos(max(-1.0, min(1.0, gravTorque/9.81))) * 180/3.1415 - 90;
-    float compPitch = -(0.1 * (compPitch + gyroPitch) + 0.9 * accelPitch);
+    double trigPitch = -(acos(max(-1.0, min(1.0, gravTorque/9.81))) * 180/3.1415 - 90);
+    double compPitch = (0.1 * (compPitch + gyroPitch) + 0.9 * accelPitch);
 
     // Serial.print("ref1:");
     // Serial.print("-90");
@@ -219,43 +273,57 @@ void controlCode(void *param)
     // Serial.print("\tcomp:");
     // Serial.println(compPitch);
 
+    trigPitch += 5;
+    compPitch += 5;
+
     // int azi = compass.getAzimuth();
 
-    float pitchSetpoint = 0;
-    float pitchError = pitchSetpoint - trigPitch;
+    double pitchSetpoint = 0;
+    double pitchError = pitchSetpoint - trigPitch;
 
-    float rateSetpoint = pitchError * 0.1;
+    double rateSetpoint = pitchError * kpp;
 
     int RATE_SP_SAT = 50;
     // pitch rate set point sat
-    rateSetpoint = abs(rateSetpoint) > RATE_SP_SAT ? abs(rateSetpoint) / RATE_SP_SAT : rateSetpoint; 
+    // rateSetpoint = abs(rateSetpoint) > RATE_SP_SAT ? abs(rateSetpoint) / RATE_SP_SAT : rateSetpoint; 
 
-    float rateError = rateSetpoint - rate;
+    // innerController->setSetpoint(rateSetpoint);
 
-    pid(rateError);
+    double rateError;
+    // if (fake_bandwidth_watchdog % 10 == 0) 
+    rateError = rateSetpoint - rate;
 
-    accel = u0;
+    innerController->setSetpoint(rateSetpoint);
 
-    // Serial.print("Pitch Setpoint: ");
-    // Serial.print(pitchSetpoint);
-    Serial.print("TrigPitch:");
-    Serial.print(trigPitch);
-    // Serial.print("\tPitch Error: ");
-    // Serial.print(pitchError);
-    Serial.print("\tRateSetpoint:");
-    Serial.print(rateSetpoint);
-    Serial.print("\tRate:");
-    Serial.print(rate);
-    Serial.print("\tRateError:");
-    Serial.print(rateError);
-    Serial.print("\tAccel:");
-    Serial.print(accel);
-    Serial.print("\tRPM:");
-    Serial.println(rpm);
+    accel = innerController->compute(rate);
+    
+    if(fake_bandwidth_watchdog % 10 == 0)
+    {
+      // Serial.print("Pitch Setpoint: ");
+      // Serial.print(pitchSetpoint);
+      // Serial.print("TrigPitch:");
+      // Serial.print(trigPitch);
+      Serial.print("CombPitch:");
+      Serial.print(compPitch);
+      // Serial.print("\tCozPitch:");
+      // Serial.println(accelPitch2);
+      Serial.print("\tPitch Error: ");
+      Serial.print(pitchError);
+      Serial.print("\tRateSetpoint:");
+      Serial.print(rateSetpoint);
+      Serial.print("\tRate:");
+      Serial.print(rate);
+      Serial.print("\tRateError:");
+      Serial.print(rateError);
+      Serial.print("\tAccel:");
+      Serial.print(accel);
+      Serial.print("\tRPM:");
+      Serial.println(rpm);
+    }
 
     if (accel != 0 ) {
       if (abs(accel) > MAX_ACCEL) accel *= ((float)MAX_ACCEL / abs(accel));
-      float accel_step = (accel * 1e-3 * 10);
+      double accel_step = (accel * 1e-3 * 10);
       if ( rpm + accel_step > MAX_SPEED && accel_step > 0 ) rpm = MAX_SPEED;
       else if (rpm + accel_step < -MAX_SPEED && accel_step < 0) rpm = -MAX_SPEED;
       else rpm += accel_step;
@@ -267,6 +335,7 @@ void controlCode(void *param)
     {
       delaymu = 1e6 * 60 / (abs(rpm) * 3200); // cast to int
     }
+    fake_bandwidth_watchdog++;
   }
 }
 
@@ -282,11 +351,12 @@ void setup() {
   rpm = 0;
   accel = 0;
 
-  Ts = 0.004;
-
-  kp = 1;
-  ki = 100;
+  kp = 0;
+  ki = 0;
   kd = 0;
+  kpp = 1;
+
+  innerController = new PID(kp, ki, kd, 0);
 
   if (!mpu.begin()) Serial.println("Failed to find MPU6050 chip");
   else 
