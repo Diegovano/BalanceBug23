@@ -6,7 +6,7 @@
 
 #include <Stepper.h>
 
-#define DEBUG 0
+#define DEBUG 1
 
 // WiFi defines
 #define WIFI_SSID "Ezra_iPhone"
@@ -14,7 +14,10 @@
 #define SERVER_IP "54.82.44.87"
 #define HTTP_PORT "3001"
 
-const char* serverUrl = "http://54.82.44.87:3001/beacon";
+const char *serverUrl = "http://54.82.44.87:3001/beacon";
+const char *triangulationUrl = "http://54.82.44.87:3001/api/flag";
+
+HTTPClient http;
 
 const size_t bufferSize = JSON_OBJECT_SIZE(6);
 
@@ -46,18 +49,18 @@ void setup() {
   Serial.println("ESP-32\nImperial College London EE2 Project Magenta");
 
   // WiFi Setup
-  pinMode(LED_BUILTIN, OUTPUT);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.println("Connecting to Wi-Fi");
+  // pinMode(LED_BUILTIN, OUTPUT);
+  // WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Serial.println("Connecting to Wi-Fi");
 
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.println(".");
-    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-    delay(500);
-  }
-  Serial.print("Connected to WiFi as");
-  Serial.println(WiFi.localIP());
-  digitalWrite(LED_BUILTIN, HIGH);
+  // while (WiFi.status() != WL_CONNECTED) {
+  //   Serial.print(".");
+  //   digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+  //   delay(500);
+  // }
+  // Serial.print("Connected to WiFi as");
+  // Serial.println(WiFi.localIP());
+  // digitalWrite(LED_BUILTIN, HIGH);
 
   // NIOS SETUP
   pinMode(NIOS_RESET_PIN, OUTPUT);
@@ -77,9 +80,16 @@ void setup() {
 int headings[3];
 
 void loop() {
-
+  while(!Serial.available()){delay(1);}
+  Serial.readString();
+  Serial.println("Starting Resectioning!");
   cameraSpin(45);
   delay(1000);
+
+  // Serial.println("Finding becons");
+  // int found = findBeacons(headings);
+  // Serial.printf("Found beacons: %x", found);
+  // delay(1000);
 }
 
 void reset_NIOS() {
@@ -292,7 +302,7 @@ void cameraSpin(double angleStep){
     }
 
     Serial.printf("Found beacons %x: R %i Y %i B %i\n", found, pixels[0], pixels[1], pixels[2]);
-    Serial.printf("Curre angle %.2f\n", curr_angle);
+    Serial.printf("Current angle %.2f\n", curr_angle);
     // all beacons have been found
     if (found_beacons == 3) break;
 
@@ -307,5 +317,30 @@ void cameraSpin(double angleStep){
   // return to 0 position
   turnAngle(-curr_angle);
 
-  
+
+  // char buffer[100];
+
+  // sprintf(buffer, "distance1=%i&distance2=%i&distance3=%i&rotation1=%i&rotation2=%i&rotation3=%i", pixels[0], pixels[1], pixels[2], (int) angles[0], (int) angles[1], (int) angles[2]);
+
+  // String getParams = String(buffer);
+  // String requestUrl = serverUrl;
+  // requestUrl += '?';
+  // requestUrl += getParams;
+
+  // // Sending beacon values to server
+  // http.begin(requestUrl);
+  // // http.addHeader("Content-Type", "application/json");
+  // int httpResponseCodeBeacon = http.GET();
+
+  // if (httpResponseCodeBeacon > 0)
+  // {
+  //   String response = http.getString();
+  //   Serial.println("HTTP Response code: " + String(httpResponseCodeBeacon));
+  //   Serial.println("Response: " + response);
+  // }
+  // else
+  // {
+  //   Serial.println("Error sending GET request");
+  // }
+  // http.end();
 }
