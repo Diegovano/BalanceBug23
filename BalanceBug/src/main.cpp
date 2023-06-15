@@ -115,13 +115,9 @@ class motor
   const int dirPin;
   direction dir;
   microstep stepping;
-  int speed; // between 0 and 100
-  int clk = 0;
 public:
-  motor(const int pinStepSet, const int pinDirSet, int speedSet, microstep stepSet = SIXT) : stpPin(pinStepSet), dirPin(pinDirSet), speed(speedSet), stepping(stepSet)
-  { 
-    setSpeed(speedSet);
-  }
+  motor(const int pinStepSet, const int pinDirSet, microstep stepSet = SIXT) : stpPin(pinStepSet), dirPin(pinDirSet), speed(speedSet), stepping(stepSet)
+  { }
 
   void step()
   {
@@ -133,15 +129,6 @@ public:
     stepping = stepSet;
 
     // need code here to set pins
-  }
-
-  void setSpeed(int speedSet)
-  {
-    dir = speedSet < 0 ? BCK : FWD;
-    speed = speedSet < -100 || speedSet > 100 ? 100 : abs(speedSet);
-
-    if (dir == BCK) digitalWrite(dirPin, HIGH);
-    else digitalWrite(dirPin, LOW);
   }
 
   void setDir(direction dir)
@@ -156,14 +143,17 @@ public:
   }
 };
 
-motor left(STPLpin, DIRLpin, 100, QUAR);
-motor right(STPRpin, DIRRpin, 100, QUAR);
+motor left(STPLpin, DIRLpin, QUAR);
+motor right(STPRpin, DIRRpin, QUAR);
 
 double rpm;
 double accel;
 int delaymu;
 
-void motorCode(void *param)
+/// @brief The function which will run on core 1 (application core).
+/// This function steps with appropriate delay to acheive the speed as defined by delaymu. This is calculated based on rpm.
+/// @param _param Not used
+void motorCode(void *_param)
 {
   Serial.print("Starting Motor Code on Core ");
   Serial.println(xPortGetCoreID());
@@ -196,7 +186,10 @@ void motorCode(void *param)
   }
 }
 
-void controlCode(void *param)
+/// @brief The function which will run on core 0 (other core).
+/// This function recomputes the values which ultimately drive the motors, based on the control algorithm.
+/// @param _param Not used
+void controlCode(void *_param)
 {
   Serial.print("Starting Control Code on Core ");
   Serial.println(xPortGetCoreID());
@@ -230,10 +223,14 @@ void controlCode(void *param)
     #endif
     }
 
+    // *****************************
+    //
+    //  SENSOR CODE
+    //
+    // *****************************
+
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
-
-    // a.acceleration.x = 9.81f;
 
     // mpu.setI2CBypass(true);
     // compass.read();
@@ -264,19 +261,18 @@ void controlCode(void *param)
     double trigPitch = -(acos(max(-1.0, min(1.0, gravTorque/9.81))) * 180/3.1415 - 90);
     double compPitch = (0.1 * (compPitch + gyroPitch) + 0.9 * accelPitch);
 
-    // Serial.print("ref1:");
-    // Serial.print("-90");
-    // Serial.print("\tref2:");
-    // Serial.print("90");
-    // Serial.print("\ttrig:");
-    // Serial.print(trigPitch);
-    // Serial.print("\tcomp:");
-    // Serial.println(compPitch);
+    // BIAS
 
     trigPitch += 6.4;
     compPitch += 6.4;
 
     // int azi = compass.getAzimuth();
+
+    // *****************************
+    //
+    //  CONTROL CODE
+    //
+    // *****************************
 
     double pitchSetpoint = -2;
     double pitchError = pitchSetpoint - trigPitch;
@@ -303,6 +299,27 @@ void controlCode(void *param)
 
     // accel = abs(reqAccel) < MAX_ACCEL ? reqAccel : ((reqAccel > 0) - (reqAccel < 0)) * MAX_ACCEL;
     
+    if (accel != 0 ) {
+      if (abs(accel) > MAX_ACCEL) accel *= ((float)MAX_ACCEL / abs(accel));
+      double accel_step = (accel * 1e-3 * 10);
+      if ( rpm + accel_step > MAX_SPEED && accel_step > 0 ) rpm = MAX_SPEED;
+      else if (rpm + accel_step < -MAX_SPEED && accel_step < 0) rpm = -MAX_SPEED;
+      else rpm += accel_step;
+    }
+
+    // Serial.println(rpm);
+
+    if ((int)rpm != 0)
+    {
+      delaymu = 1e6 * 60 / (abs(rpm) * 3200); // cast to int
+    }
+
+    // *****************************
+    //
+    //  PLOTTING CODE
+    //
+    // *****************************
+
     if(fake_bandwidth_watchdog % 10 == 0)
     {
       // Serial.print("Pitch Setpoint: ");
@@ -325,21 +342,6 @@ void controlCode(void *param)
       Serial.print(accel);
       Serial.print("\tRPM:");
       Serial.println(rpm);
-    }
-
-    if (accel != 0 ) {
-      if (abs(accel) > MAX_ACCEL) accel *= ((float)MAX_ACCEL / abs(accel));
-      double accel_step = (accel * 1e-3 * 10);
-      if ( rpm + accel_step > MAX_SPEED && accel_step > 0 ) rpm = MAX_SPEED;
-      else if (rpm + accel_step < -MAX_SPEED && accel_step < 0) rpm = -MAX_SPEED;
-      else rpm += accel_step;
-    }
-
-    // Serial.println(rpm);
-
-    if ((int)rpm != 0)
-    {
-      delaymu = 1e6 * 60 / (abs(rpm) * 3200); // cast to int
     }
     fake_bandwidth_watchdog++;
   }
@@ -398,10 +400,11 @@ void setup() {
     1);
     
   vTaskDelete(NULL);
-
+  delete innerController;
 }
 
 void loop() 
 {
-  // empty
+  // empty as core 1 tasks already defined (motorCode)
+  // defining the task outself allows priority override.
 }
