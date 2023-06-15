@@ -9,8 +9,8 @@
 #define DEBUG 1
 
 // WiFi defines
-#define WIFI_SSID "Ezra_iPhone"
-#define WIFI_PASSWORD "12345678"
+#define WIFI_SSID "iPhone di Luigi"
+#define WIFI_PASSWORD "chungusVBD"
 #define SERVER_IP "54.82.44.87"
 #define HTTP_PORT "3001"
 
@@ -20,6 +20,8 @@ const char *triangulationUrl = "http://54.82.44.87:3001/api/flag";
 HTTPClient http;
 
 const size_t bufferSize = JSON_OBJECT_SIZE(6);
+
+int pollServer();
 
 // NIOS defines
 #define NIOS_RESET_PIN 18
@@ -48,19 +50,19 @@ void setup() {
   Serial.begin(115200);
   Serial.println("ESP-32\nImperial College London EE2 Project Magenta");
 
-  // WiFi Setup
-  // pinMode(LED_BUILTIN, OUTPUT);
-  // WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  // Serial.println("Connecting to Wi-Fi");
+  // // WiFi Setup
+  pinMode(LED_BUILTIN, OUTPUT);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.println("Connecting to Wi-Fi");
 
-  // while (WiFi.status() != WL_CONNECTED) {
-  //   Serial.print(".");
-  //   digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-  //   delay(500);
-  // }
-  // Serial.print("Connected to WiFi as");
-  // Serial.println(WiFi.localIP());
-  // digitalWrite(LED_BUILTIN, HIGH);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+    delay(500);
+  }
+  Serial.print("Connected to WiFi as");
+  Serial.println(WiFi.localIP());
+  digitalWrite(LED_BUILTIN, HIGH);
 
   // NIOS SETUP
   pinMode(NIOS_RESET_PIN, OUTPUT);
@@ -78,13 +80,37 @@ void setup() {
 }
 
 int headings[3];
+bool spinCamera = 0;
 
 void loop() {
-  while(!Serial.available()){delay(1);}
-  Serial.readString();
-  Serial.println("Starting Resectioning!");
-  cameraSpin(45);
-  delay(1000);
+  
+  if(Serial.available()){
+    Serial.readString();
+    spinCamera = 1;
+  }
+
+  if(!spinCamera){
+    spinCamera = pollServer() == 1;
+  }
+
+  if (spinCamera) {
+    reset_NIOS();
+    
+    while (!NIOS.available()) {
+      delay(500);
+      Serial.print(".");
+    }
+    while (NIOS.available()){
+      Serial.print("Connected:");
+      Serial.println(NIOS.readString());
+    }
+
+    Serial.println("Starting Resectioning!");
+    cameraSpin(45);
+    spinCamera = 0;
+  }
+    
+  delay(500);
 
   // Serial.println("Finding becons");
   // int found = findBeacons(headings);
@@ -286,19 +312,19 @@ void cameraSpin(double angleStep){
       founds[0] = 1;
       angles[0] = curr_angle;
       Serial.print("found red ");
-      found_beacons++;
+      // found_beacons++;
     }
     if (found & 0b010) {
       founds[1] = 1;
       angles[1] = curr_angle;
       Serial.print("found yellow ");
-      found_beacons++;
+      // found_beacons++;
     }
     if (found & 0b001) {
       founds[2] = 1;
       angles[2] = curr_angle;
       Serial.print("found blue ");
-      found_beacons++;
+      // found_beacons++;
     }
 
     Serial.printf("Found beacons %x: R %i Y %i B %i\n", found, pixels[0], pixels[1], pixels[2]);
@@ -318,29 +344,71 @@ void cameraSpin(double angleStep){
   turnAngle(-curr_angle);
 
 
-  // char buffer[100];
+  char buffer[100];
 
-  // sprintf(buffer, "distance1=%i&distance2=%i&distance3=%i&rotation1=%i&rotation2=%i&rotation3=%i", pixels[0], pixels[1], pixels[2], (int) angles[0], (int) angles[1], (int) angles[2]);
+  sprintf(buffer, "distanceB=%i&distanceR=%i&distanceY=%i&rotationB=%i&rotationR=%i&rotationY=%i", pixels[0], pixels[1], pixels[2], (int) angles[0], (int) angles[1], (int) angles[2]);
 
-  // String getParams = String(buffer);
-  // String requestUrl = serverUrl;
-  // requestUrl += '?';
-  // requestUrl += getParams;
+  String getParams = String(buffer);
+  String requestUrl = serverUrl;
+  requestUrl += '?';
+  requestUrl += getParams;
 
-  // // Sending beacon values to server
-  // http.begin(requestUrl);
-  // // http.addHeader("Content-Type", "application/json");
-  // int httpResponseCodeBeacon = http.GET();
+  // Sending beacon values to server
+  http.begin(requestUrl);
+  // http.addHeader("Content-Type", "application/json");
+  int httpResponseCodeBeacon = http.GET();
 
-  // if (httpResponseCodeBeacon > 0)
-  // {
-  //   String response = http.getString();
-  //   Serial.println("HTTP Response code: " + String(httpResponseCodeBeacon));
-  //   Serial.println("Response: " + response);
-  // }
-  // else
-  // {
-  //   Serial.println("Error sending GET request");
-  // }
-  // http.end();
+  if (httpResponseCodeBeacon > 0)
+  {
+    String response = http.getString();
+    Serial.println("HTTP Response code: " + String(httpResponseCodeBeacon));
+    Serial.println("Response: " + response);
+  }
+  else
+  {
+    Serial.println("Error sending GET request");
+  }
+  http.end();
+}
+
+int pollServer(){
+  http.begin(triangulationUrl);
+  int httpResponseCodeTriangulation = http.GET();
+
+  if (httpResponseCodeTriangulation == HTTP_CODE_OK)
+  {
+    String response = http.getString();
+    // Serial.println(response);
+    DynamicJsonDocument doc(1024);
+    DeserializationError error = deserializeJson(doc, response);
+
+    if (error)
+    {
+      #if DEBUG
+      Serial.print("Error parsing JSON: ");
+      Serial.println(error.c_str());
+      #endif
+      http.end();
+      return -1;
+    }
+    else
+    {
+      int flagValue = doc["flag"];
+      #if DEBUG
+      Serial.print("Flag value: ");
+      Serial.println(flagValue);
+      #endif
+      http.end();
+      return flagValue;
+    }
+  }
+  else
+  {
+    #if DEBUG
+    Serial.print("Error: ");
+    Serial.println(httpResponseCodeTriangulation);
+    #endif
+    http.end();
+    return -1;
+  }  
 }
