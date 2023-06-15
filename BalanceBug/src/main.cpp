@@ -6,8 +6,8 @@
 
 #define MANUAL_SPEED_CONTORL false
 
-const int MAX_ACCEL = 1000;
-const int MAX_SPEED = 150;
+const int MAX_ACCEL = 1500;
+const int MAX_SPEED = 100;
 
 const int STPRpin = 25;
 const int DIRRpin = 26;
@@ -220,7 +220,7 @@ void controlCode(void *param)
       kp = Serial.parseFloat();
       ki = Serial.parseFloat();
       kd = Serial.parseFloat();
-      kpp = Serial.parseFloat();
+      // kpp = Serial.parseFloat();
       Serial.print("prop term set: ");
       Serial.println(kp);
       rpm = 0;
@@ -273,12 +273,12 @@ void controlCode(void *param)
     // Serial.print("\tcomp:");
     // Serial.println(compPitch);
 
-    trigPitch += 5;
-    compPitch += 5;
+    trigPitch += 6.4;
+    compPitch += 6.4;
 
     // int azi = compass.getAzimuth();
 
-    double pitchSetpoint = 0;
+    double pitchSetpoint = -2;
     double pitchError = pitchSetpoint - trigPitch;
 
     double rateSetpoint = pitchError * kpp;
@@ -293,18 +293,24 @@ void controlCode(void *param)
     // if (fake_bandwidth_watchdog % 10 == 0) 
     rateError = rateSetpoint - rate;
 
-    innerController->setSetpoint(rateSetpoint);
+    // innerController->setSetpoint(rateSetpoint);
+    innerController->setSetpoint(pitchSetpoint);
+    double reqRpm = (double)innerController->compute(trigPitch);
+    rpm = abs(reqRpm) < MAX_SPEED ? reqRpm : ((reqRpm > 0) - (reqRpm < 0)) * MAX_SPEED;
 
-    accel = innerController->compute(rate);
+
+    // float reqAccel = innerController->compute(rate);
+
+    // accel = abs(reqAccel) < MAX_ACCEL ? reqAccel : ((reqAccel > 0) - (reqAccel < 0)) * MAX_ACCEL;
     
     if(fake_bandwidth_watchdog % 10 == 0)
     {
       // Serial.print("Pitch Setpoint: ");
       // Serial.print(pitchSetpoint);
-      // Serial.print("TrigPitch:");
-      // Serial.print(trigPitch);
-      Serial.print("CombPitch:");
-      Serial.print(compPitch);
+      Serial.print("TrigPitch:");
+      Serial.print(trigPitch);
+      // Serial.print("CombPitch:");
+      // Serial.print(compPitch);
       // Serial.print("\tCozPitch:");
       // Serial.println(accelPitch2);
       Serial.print("\tPitch Error: ");
@@ -351,9 +357,9 @@ void setup() {
   rpm = 0;
   accel = 0;
 
-  kp = 0;
-  ki = 0;
-  kd = 0;
+  kp = 5.5;
+  ki = 0.0001;
+  kd = 0.00000001;
   kpp = 1;
 
   innerController = new PID(kp, ki, kd, 0);
