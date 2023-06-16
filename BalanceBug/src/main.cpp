@@ -116,7 +116,7 @@ class motor
   direction dir;
   microstep stepping;
 public:
-  motor(const int pinStepSet, const int pinDirSet, microstep stepSet = SIXT) : stpPin(pinStepSet), dirPin(pinDirSet), speed(speedSet), stepping(stepSet)
+  motor(const int pinStepSet, const int pinDirSet, microstep stepSet = SIXT) : stpPin(pinStepSet), dirPin(pinDirSet), stepping(stepSet)
   { }
 
   void step()
