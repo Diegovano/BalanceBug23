@@ -1,11 +1,14 @@
 #include <Arduino.h>
 
 #define MANUAL_SPEED_CONTORL false
-#define POS_INPUT true
-#define SPE_INPUT false
-#define ACC_INPUT false
+#define POS 1
+#define ANG 2
+#define SPE 3
+#define ACC 4
+#define INPUT_TYPE ANG
 
-const float WHEEL_RADIUS = 3.75;
+const float WHEEL_RADIUS = 3.5;
+const float WHEEL_CENTRE_OFFSET = 9.5;
 
 const int MAX_ACCEL = 1500;
 const int MAX_SPEED = 100;
@@ -69,9 +72,19 @@ motor right(STPRpin, DIRRpin, QUAR);
 
 float rpm;
 float accel;
-float position;
-int steps;
-int delaymu;
+unsigned int degreeSteps;
+unsigned int steps;
+unsigned int delaymu;
+
+void stepRoutine(float delay)
+{
+  left.step();
+  right.step();
+  delayMicroseconds(delay / 2);
+  left.setLow();
+  right.setLow();
+  delayMicroseconds(delay / 2);
+}
 
 /// @brief The function which will run on core 1 (application core).
 /// This function steps with appropriate delay to acheive the speed as defined by delaymu. This is calculated based on rpm.
@@ -83,32 +96,7 @@ void motorCode(void *_param)
 
   while( true ) // loop to run in core
   {
-    if (steps > 0)
-    {
-      steps--;
-      if (rpm != 0)
-      {
-        delaymu = 1e6 * 60 / (abs(rpm) * 3200);
-
-        if (rpm < 0)
-        {
-          left.setDir(BCK);
-          right.setDir(BCK);
-        }
-        else // rpm not equal to 0
-        {
-          left.setDir(FWD);
-          right.setDir(FWD);
-        }
-        left.step();
-        right.step();
-        delayMicroseconds(delaymu / 2);
-        left.setLow();
-        right.setLow();
-        delayMicroseconds(delaymu / 2);
-      }
-    }
-    else if (false && rpm != 0)
+    if (rpm != 0)
     {
       delaymu = 1e6 * 60 / (abs(rpm) * 3200);
 
@@ -122,12 +110,28 @@ void motorCode(void *_param)
         left.setDir(FWD);
         right.setDir(FWD);
       }
-      left.step();
-      right.step();
-      delayMicroseconds(delaymu / 2);
-      left.setLow();
-      right.setLow();
-      delayMicroseconds(delaymu / 2);
+      if (degreeSteps != 0)
+      {
+        degreeSteps--;
+        if (rpm < 0) // make it turn!
+        {
+          left.setDir(FWD);
+        }
+        else 
+        {
+          left.setDir(BCK);
+        }
+        stepRoutine(delaymu);
+      }
+      else if (steps > 0)
+      {
+        steps--;
+        stepRoutine(delaymu);
+      }
+      else if (false && rpm != 0) // never run for now
+      {
+        stepRoutine(delaymu);
+      }
     }
     else
     {
@@ -161,11 +165,11 @@ void controlCode(void *_param)
 
     // if is position
 
-    #if POS_INPUT
+    #if INPUT_TYPE == 1
 
     if(Serial.available())
     {
-      position = Serial.parseInt();
+      float position = Serial.parseInt();
       Serial.print("Position Set: ");
 
       Serial.println(position);
@@ -182,13 +186,32 @@ void controlCode(void *_param)
 
     // set direction
 
-    #elif SPE_INPUT
+    #elif INPUT_TYPE == 2
+
+    if(Serial.available())
+    {
+      float degrees = (float)Serial.parseInt();
+      Serial.print("Angle Set: ");
+      Serial.println(degrees);
+
+      accel = 0;
+      degreeSteps = abs(degrees) / (asin((2 * PI * WHEEL_RADIUS) / (WHEEL_CENTRE_OFFSET * 3200)) * 180/PI); // assume 16th steps
+
+
+      if (degrees * rpm < 0)
+      {
+        rpm *= -1; // get rpm in correct dir
+      }
+    }
+
+
+    #elif INPUT_TYPE == 3
 
     steps = 0;
     accel = 0;
     rpm = abs(inSpeed) < MAX_SPEED ? inSpeed : ((inSpeed > 0) - (inSpeed < 0)) * MAX_SPEED;
 
-    #elif ACC_INPUT
+    #elif INPUT_TYPE == 4
 
     steps = 0;
     rpm = 0;
@@ -233,7 +256,6 @@ void setup() {
 
   rpm = 10;
   accel = 0;
-  position = 0;
 
   xTaskCreatePinnedToCore(
     controlCode,
