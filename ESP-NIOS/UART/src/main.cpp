@@ -68,7 +68,10 @@ void setup() {
   pinMode(NIOS_RESET_PIN, OUTPUT);
   reset_NIOS();
 
+  delay(100);
+
   NIOS.begin(115200, SERIAL_8N1, 16, 17); 
+  NIOS.printf("Hello from ESP\n");
   while (!NIOS.available()) {
     delay(500);
     Serial.println("Waiting for message from NIOS");
@@ -94,12 +97,12 @@ void loop() {
   }
 
   if (spinCamera) {
-    reset_NIOS();
+    // reset_NIOS();
     
-    while (!NIOS.available()) {
-      delay(500);
-      Serial.print(".");
-    }
+    // while (!NIOS.available()) {
+    //   delay(500);
+    //   Serial.print(".");
+    // }
     while (NIOS.available()){
       Serial.print("Connected:");
       Serial.println(NIOS.readString());
@@ -140,6 +143,7 @@ void setRED(){
   NIOS.printf("A%08x\n", 0x1);
   delay(50);
   NIOS.printf("P%08x\n", 10);
+  delay(50);
 }
 
 void setBLUE(){
@@ -155,6 +159,7 @@ void setBLUE(){
   NIOS.printf("A%08x\n", 0x1);
   delay(50);
   NIOS.printf("P%08x\n", 10);
+  delay(50);
 } 
 
 void setYELLOW(){
@@ -170,6 +175,7 @@ void setYELLOW(){
   NIOS.printf("A%08x\n", 0x5);
   delay(50);
   NIOS.printf("P%08x\n", 20);
+  delay(50);
 }
 
 // Turn the stepper motor by an angle
@@ -208,7 +214,7 @@ int findBeacons(int headings[3]){
 
     // check for yellow
     #if DEBUG
-    Serial.printf("Searching for %s\n", colour);
+    Serial.printf("Searching for %s \n", colour);
     #endif  
 
     if (i == 0) setRED();
@@ -220,6 +226,7 @@ int findBeacons(int headings[3]){
     // Serial.println(NIOS.readString()); // buff flush
     // NIOS.readString();
     NIOS.printf("B"); // request Beacons information
+    delay(20);
     while(!NIOS.available()){delay(1);} // wait for information to come back
 
     if(NIOS.available()){
@@ -346,7 +353,7 @@ void cameraSpin(double angleStep){
 
   char buffer[100];
 
-  sprintf(buffer, "distanceB=%i&distanceR=%i&distanceY=%i&rotationB=%i&rotationR=%i&rotationY=%i", pixels[0], pixels[1], pixels[2], (int) angles[0], (int) angles[1], (int) angles[2]);
+  sprintf(buffer, "distanceR=%i&distanceY=%i&distanceB=%i&rotationR=%i&rotationY=%i&rotationB=%i", pixels[0], pixels[1], pixels[2], (int) angles[0], (int) angles[1], (int) angles[2]);
 
   String getParams = String(buffer);
   String requestUrl = serverUrl;
@@ -375,7 +382,7 @@ int pollServer(){
   http.begin(triangulationUrl);
   int httpResponseCodeTriangulation = http.GET();
 
-  if (httpResponseCodeTriangulation == HTTP_CODE_OK)
+  if (httpResponseCodeTriangulation != -1)
   {
     String response = http.getString();
     // Serial.println(response);
