@@ -147,7 +147,7 @@ void setRED(){
   delay(50);
   NIOS.printf("G%08x\n", 0x040);
   delay(50);
-  NIOS.printf("H%08x\n", 0xFF2200);
+  NIOS.printf("H%08x\n", 0xEE2200);
   delay(50);
   NIOS.printf("T%08x\n", 0x1d3d);
   delay(50);
@@ -175,17 +175,17 @@ void setBLUE(){
 
 void setYELLOW(){
   // YELLOW
-  NIOS.printf("E%08x\n", 0xd80);
+  NIOS.printf("E%08x\n", 0xe80);
   delay(50);
-  NIOS.printf("G%08x\n", 0x0);
+  NIOS.printf("G%08x\n", 0x040);
   delay(50);
-  NIOS.printf("H%08x\n", 0xEEFF00);
+  NIOS.printf("H%08x\n", 0xFFFF1f);
   delay(50);
   NIOS.printf("T%08x\n", 0x1d15);
   delay(50);
   NIOS.printf("A%08x\n", 0x5);
   delay(50);
-  NIOS.printf("P%08x\n", 20);
+  NIOS.printf("P%08x\n", 10);
   delay(50);
 }
 
