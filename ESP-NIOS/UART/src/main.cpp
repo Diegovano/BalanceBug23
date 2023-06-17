@@ -232,7 +232,7 @@ int findBeacons(int headings[3], bool detected[3]){
       else if (i == 1) setYELLOW();
       else if (i == 2) setBLUE();
 
-      delay(100);
+      delay(300);
 
       // Serial.println(NIOS.readString()); // buff flush
       // NIOS.readString();
