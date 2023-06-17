@@ -2,9 +2,22 @@
 #include <Adafruit_MPU6050.h>
 #include <QMC5883LCompass.h>
 #include <Adafruit_Sensor.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 #include <Wire.h>
+#include <string>
+
+#define WIFI_SSID "Diego-XPS"
+#define WIFI_PASSWORD "helloGitHub!"
+#define SERVER_IP "54.82.44.87"
+#define HTTP_PORT "3001"
 
 #define MANUAL_SPEED_CONTORL false
+#define PLOTTING false
+
+std::string posURL = "http://" + std::string(SERVER_IP) + ':' + std::string(HTTP_PORT) + "/posRequest";
+
+HTTPClient http;
 
 const int MAX_ACCEL = 1500;
 const int MAX_SPEED = 100;
@@ -17,6 +30,7 @@ const int DIRLpin = 33;
 float kp, ki, kd, kpp;
 
 TaskHandle_t stepTask;
+TaskHandle_t pollTask;
 TaskHandle_t otherTasks;
 
 Adafruit_MPU6050 mpu;
@@ -186,6 +200,47 @@ void motorCode(void *_param)
   }
 }
 
+void pollServerForDistance(void *_param)
+{
+  Serial.print("Starting Polling Code on Core ");
+  Serial.println(xPortGetCoreID());
+
+  while( true )
+  {
+    if (WiFi.status() != WL_CONNECTED)
+    {
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      Serial.println("Connecting to Wi-Fi");
+
+      do  
+      {
+        Serial.print(".");
+        digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+        vTaskDelay(500);
+      } while (WiFi.status() != WL_CONNECTED);
+    }
+
+    http.begin(posURL.c_str());
+    int responseCode = http.GET();
+
+    if (responseCode != -1)
+    {
+      std::string response = http.getString().c_str();
+
+      // Serial.println(response.c_str());
+      Serial.println(10); // constant for now;
+    }
+    else
+    {
+      Serial.println("Error Receiving Response!");
+      http.end();
+    }
+    http.end();
+    vTaskDelay(1 * 1000);
+  }
+}
+
+
 /// @brief The function which will run on core 0 (other core).
 /// This function recomputes the values which ultimately drive the motors, based on the control algorithm.
 /// @param _param Not used
@@ -200,7 +255,7 @@ void controlCode(void *_param)
   {
     // Serial.println(millis() - time123);
     time123 = millis();
-    // vTaskDelay(1);
+    vTaskDelay(10);
     if(Serial.available())
     {
     #if MANUAL_SPEED_CONTORL
@@ -313,13 +368,14 @@ void controlCode(void *_param)
     {
       delaymu = 1e6 * 60 / (abs(rpm) * 3200); // cast to int
     }
-
+    
     // *****************************
     //
     //  PLOTTING CODE
     //
     // *****************************
 
+    #if PLOTTING
     if(fake_bandwidth_watchdog % 10 == 0)
     {
       // Serial.print("Pitch Setpoint: ");
@@ -344,24 +400,43 @@ void controlCode(void *_param)
       Serial.println(rpm);
     }
     fake_bandwidth_watchdog++;
+    #else
+
+    // int distance = pollServerForDistance();
+
+    // Serial.println(distance);
+
+    #endif
   }
 }
 
 void setup() {
-  Serial.begin(115200);
-  Serial.println("starting!");
-
   pinMode(STPRpin, OUTPUT);
   pinMode(STPLpin, OUTPUT);
   pinMode(DIRRpin, OUTPUT);
   pinMode(DIRLpin, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  Serial.begin(115200);
+  Serial.println("starting!");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.println("Connecting to Wi-Fi");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+    delay(500);
+  }
+  Serial.print("Connected to WiFi as");
+  Serial.println(WiFi.localIP());
+  digitalWrite(LED_BUILTIN, HIGH);
 
   rpm = 0;
   accel = 0;
 
-  kp = 5.5;
-  ki = 0.0001;
-  kd = 0.00000001;
+  kp = 3;
+  ki = 0.0;
+  kd = 0.01;
   kpp = 1;
 
   innerController = new PID(kp, ki, kd, 0);
@@ -380,11 +455,22 @@ void setup() {
   }
 
   xTaskCreatePinnedToCore(
-    controlCode,
-    "Controller Code",
+    pollServerForDistance,
+    "ServerPollCode",
     4096,
     NULL,
-    tskIDLE_PRIORITY,
+    1,
+    &pollTask,
+    0);
+    
+  delay(500);
+
+  xTaskCreatePinnedToCore(
+    controlCode,
+    "ControllerCode",
+    4096,
+    NULL,
+    1,
     &otherTasks,
     0);
 
@@ -398,7 +484,7 @@ void setup() {
     10,
     &stepTask,
     1);
-    
+
   vTaskDelete(NULL);
   delete innerController;
 }
