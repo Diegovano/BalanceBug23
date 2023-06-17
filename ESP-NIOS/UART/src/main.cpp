@@ -51,18 +51,18 @@ void setup() {
   Serial.println("ESP-32\nImperial College London EE2 Project Magenta");
 
   // // WiFi Setup
-  pinMode(LED_BUILTIN, OUTPUT);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.println("Connecting to Wi-Fi");
+  // pinMode(LED_BUILTIN, OUTPUT);
+  // WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Serial.println("Connecting to Wi-Fi");
 
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
-    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-    delay(500);
-  }
-  Serial.print("Connected to WiFi as");
-  Serial.println(WiFi.localIP());
-  digitalWrite(LED_BUILTIN, HIGH);
+  // while (WiFi.status() != WL_CONNECTED) {
+  //   Serial.print(".");
+  //   digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+  //   delay(500);
+  // }
+  // Serial.print("Connected to WiFi as");
+  // Serial.println(WiFi.localIP());
+  // digitalWrite(LED_BUILTIN, HIGH);
 
   // NIOS SETUP
   pinMode(NIOS_RESET_PIN, OUTPUT);
@@ -87,37 +87,35 @@ bool spinCamera = 0;
 
 void loop() {
   
-  if(Serial.available()){
-    Serial.readString();
-    spinCamera = 1;
+  while(!Serial.available()) {
+    delay(1);
   }
 
-  if(!spinCamera){
-    spinCamera = pollServer() == 1;
+  switch(Serial.parseInt()){
+    case 0: 
+      setRED();
+      Serial.println("Settings REd");
+      break;
+    case 1:
+      setYELLOW();
+      Serial.println("Settings yellow");
+      break;
+    case 2:
+      setBLUE();
+      Serial.println("Settings blue");
+      break;
+    default:
+      Serial.println("invalid");
+      break;
   }
 
-  if (spinCamera) {
-    // reset_NIOS();
-    
-    // while (!NIOS.available()) {
-    //   delay(500);
-    //   Serial.print(".");
-    // }
-    while (NIOS.available()){
-      Serial.print("Connected:");
-      Serial.println(NIOS.readString());
-    }
-
-    Serial.println("Starting Resectioning!");
-    cameraSpin(45);
-    spinCamera = 0;
+  NIOS.printf("B"); // request Beacons information
+  delay(20);
+  while(!NIOS.available()){
+    delay(1);
   }
-    
-  delay(500);
+    Serial.println(NIOS.readString());
 
-  // Serial.println("Finding becons");
-  // int found = findBeacons(headings);
-  // Serial.printf("Found beacons: %x", found);
   // delay(1000);
 }
 
@@ -132,13 +130,13 @@ void reset_NIOS() {
 
 void setRED(){
   // RED
-  NIOS.printf("E%08x\n", 0x3D0);
+  NIOS.printf("E%08x\n", 0x2D0);
   delay(50);
-  NIOS.printf("G%08x\n", 0x0);
+  NIOS.printf("G%08x\n", 0x040);
   delay(50);
-  NIOS.printf("H%08x\n", 0xFF0000);
+  NIOS.printf("H%08x\n", 0xFF2200);
   delay(50);
-  NIOS.printf("T%08x\n", 0x1e3d);
+  NIOS.printf("T%08x\n", 0x1d3d);
   delay(50);
   NIOS.printf("A%08x\n", 0x1);
   delay(50);
@@ -283,7 +281,12 @@ int findBeacons(int headings[3], bool detected[3]){
         }
       }
     } else {
+      #if DEBUG
       Serial.printf("%s already found\n", colour);
+      Serial.println(NIOS.readString());
+      #else
+      NIOS.readString(); // read to flush buffer;
+      #endif
     }
     free(colour);
   }
