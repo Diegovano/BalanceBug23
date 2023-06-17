@@ -44,7 +44,7 @@ int findBeacons(int headings[3]);
 const double stepsPerRevolution = 2037.8864;
 Stepper myStepper(stepsPerRevolution, IN1, IN3, IN2, IN4);
 
-void cameraSpin(double angle);
+int cameraSpin(double angle);
 
 void setup() {
   Serial.begin(115200);
@@ -109,7 +109,18 @@ void loop() {
     }
 
     Serial.println("Starting Resectioning!");
-    cameraSpin(45);
+    while(cameraSpin(45) == -1){
+      Serial.println("[main] Camera spin failed, resetting NIOS");
+      reset_NIOS();
+      while (!NIOS.available()) {
+        delay(500);
+        Serial.println(".");
+      }
+      while (NIOS.available()){
+        Serial.println("Recevied from NIOS:");
+        Serial.println(NIOS.readString());
+      }
+    }
     spinCamera = 0;
   }
     
@@ -132,13 +143,13 @@ void reset_NIOS() {
 
 void setRED(){
   // RED
-  NIOS.printf("E%08x\n", 0x3D0);
+  NIOS.printf("E%08x\n", 0x2D0);
   delay(50);
-  NIOS.printf("G%08x\n", 0x0);
+  NIOS.printf("G%08x\n", 0x040);
   delay(50);
-  NIOS.printf("H%08x\n", 0xFF0000);
+  NIOS.printf("H%08x\n", 0xFF2200);
   delay(50);
-  NIOS.printf("T%08x\n", 0x1e3d);
+  NIOS.printf("T%08x\n", 0x1d3d);
   delay(50);
   NIOS.printf("A%08x\n", 0x1);
   delay(50);
@@ -183,7 +194,7 @@ void setYELLOW(){
 void turnAngle(double angle){
   int num_steps = int(angle * stepsPerRevolution / 360);
   #if DEBUG
-  Serial.printf("Turning %.2f degrees, %i steps", angle, num_steps);
+  Serial.printf("[Stepper Control] Turning %.2f degrees, %i steps\n", angle, num_steps);
   #endif
   myStepper.setSpeed(STEPPER_SPEED);
   myStepper.step(num_steps);
@@ -284,13 +295,14 @@ int findBeacons(int headings[3], bool detected[3]){
       }
     } else {
       Serial.printf("%s already found\n", colour);
+      Serial.println(NIOS.readString());
     }
     free(colour);
   }
   return found;
 }
 
-void cameraSpin(double angleStep){
+int cameraSpin(double angleStep){
   // first turn the camera -180 to then be able to turn 360 and then -180 again
   turnAngle(-180);
 
@@ -317,21 +329,27 @@ void cameraSpin(double angleStep){
 
     int found = findBeacons(pixels, founds);
 
+    if (found == -1 ){
+      Serial.println("[camera Spin] Beacon finding failed");
+      turnAngle(-curr_angle);
+      return -1;
+    }
+
     if (found & 0b100) {
       angles[0] = curr_angle;
-      Serial.print("found red ");
+      Serial.print("[camera Spin] found red ");
     }
     if (found & 0b010) {
       angles[1] = curr_angle;
-      Serial.print("found yellow ");
+      Serial.print("[camera Spin] found yellow ");
     }
     if (found & 0b001) {
       angles[2] = curr_angle;
-      Serial.print("found blue ");
+      Serial.print("[camera Spin] found blue ");
     }
 
-    Serial.printf("Found beacons %x: R %i Y %i B %i\n", found, pixels[0], pixels[1], pixels[2]);
-    Serial.printf("Current angle %.2f\n", curr_angle);
+    Serial.printf("[camera Spin] Found beacons %x: R %i Y %i B %i\n", found, pixels[0], pixels[1], pixels[2]);
+    Serial.printf("[camera Spin] Current angle %.2f\n", curr_angle);
 
     // all beacons have been found
     if (founds[0] && founds[1] && founds[2]) break;
@@ -373,6 +391,7 @@ void cameraSpin(double angleStep){
     Serial.println("Error sending GET request");
   }
   http.end();
+  return 0;
 }
 
 int pollServer(){
