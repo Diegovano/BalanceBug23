@@ -200,10 +200,9 @@ int hex2int(char byte) {
 // function that polls the nios to check for the presence of beacons
 // writes the pixel value to the array param
 // return 3 bits where each bit represents the red, yellow blue (100) means only red was found
-int findBeacons(int headings[3]){
+int findBeacons(int headings[3], bool detected[3]){
   int found = 0;
   int pixel = 0;
-
 
   for(int i = 0; i < 3; i++){
     found = found << 1; // shift left by 1
@@ -212,78 +211,81 @@ int findBeacons(int headings[3]){
     else if (i == 1) strcpy(colour, "yellow");
     else if (i == 2) strcpy(colour, "blue");
 
-    // check for yellow
-    #if DEBUG
-    Serial.printf("Searching for %s \n", colour);
-    #endif  
+    if(!detected[i]){
+      // check for yellow
+      #if DEBUG
+      Serial.printf("Searching for %s \n", colour);
+      #endif  
 
-    if (i == 0) setRED();
-    else if (i == 1) setYELLOW();
-    else if (i == 2) setBLUE();
+      if (i == 0) setRED();
+      else if (i == 1) setYELLOW();
+      else if (i == 2) setBLUE();
 
-    delay(100);
+      delay(100);
 
-    // Serial.println(NIOS.readString()); // buff flush
-    // NIOS.readString();
-    NIOS.printf("B"); // request Beacons information
-    delay(20);
-    while(!NIOS.available()){delay(1);} // wait for information to come back
+      // Serial.println(NIOS.readString()); // buff flush
+      // NIOS.readString();
+      NIOS.printf("B"); // request Beacons information
+      delay(20);
+      while(!NIOS.available()){delay(1);} // wait for information to come back
 
-    if(NIOS.available()){
-      char in = NIOS.read();
-      // find out if the colour was present
-      if (in != 'D') {
-        Serial.printf("NIOS %s read failed, %c\n", colour, in);
-        return -1;
-      }
-
-      in = NIOS.read(); // 0 or 1 based on if the beacons was found
-
-      if (in == '1'){
-        found = found | 1;
-        #if DEBUG
-        Serial.printf("%s Beacon Found ", colour);
-        #endif
-        in = NIOS.read();
-        if (in != 'B') {
-          Serial.printf("NIOS %s read failed, %c\n",colour,  in);
+      if(NIOS.available()){
+        char in = NIOS.read();
+        // find out if the colour was present
+        if (in != 'D') {
+          Serial.printf("NIOS %s read failed, %c\n", colour, in);
           return -1;
         }
-        pixel = 0;
-        // read pixel value
-        while((in = NIOS.read()) != '\n'){
-          pixel = pixel << 4 | hex2int(in);
+
+        in = NIOS.read(); // 0 or 1 based on if the beacons was found
+
+        if (in == '1'){
+          found = found | 1;
           #if DEBUG
-          Serial.printf("%i,%c", pixel, in);
+          Serial.printf("%s Beacon Found ", colour);
+          #endif
+          in = NIOS.read();
+          if (in != 'B') {
+            Serial.printf("NIOS %s read failed, %c\n",colour,  in);
+            return -1;
+          }
+          pixel = 0;
+          // read pixel value
+          while((in = NIOS.read()) != '\n'){
+            pixel = pixel << 4 | hex2int(in);
+            #if DEBUG
+            Serial.printf("%i,%c", pixel, in);
+            #endif
+          }
+          #if DEBUG
+          Serial.printf(" at position %i\n", pixel);
+          #endif
+
+          headings[i] = pixel;
+          detected[i] = 1;
+
+          #if DEBUG
+          // while((in = NIOS.read()) != '\n'){
+          //   Serial.print(in);
+          // }
+          // Serial.print('\n');
+          Serial.print(NIOS.readString());
+          #else
+          NIOS.readString(); // read to flush buffer;
+          #endif
+        } else {
+          #if DEBUG
+          Serial.printf("%s not found, ", colour);
+          Serial.println(NIOS.readString());
+          #else
+          NIOS.readString(); // read to flush buffer;
           #endif
         }
-        #if DEBUG
-        Serial.printf(" at position %i\n", pixel);
-        #endif
-
-        headings[i] = pixel;
-
-        #if DEBUG
-        // while((in = NIOS.read()) != '\n'){
-        //   Serial.print(in);
-        // }
-        // Serial.print('\n');
-        Serial.print(NIOS.readString());
-        #else
-        NIOS.readString(); // read to flush buffer;
-        #endif
-      } else {
-        #if DEBUG
-        Serial.printf("%s not found, ", colour);
-        Serial.println(NIOS.readString());
-        #else
-        NIOS.readString(); // read to flush buffer;
-        #endif
       }
+    } else {
+      Serial.printf("%s already found\n", colour);
     }
-
     free(colour);
-    
   }
   return found;
 }
@@ -313,31 +315,26 @@ void cameraSpin(double angleStep){
   // step through that many steps and measure lights
   for (int i = 0; i < num_turns; i++){
 
-    int found = findBeacons(pixels);
+    int found = findBeacons(pixels, founds);
 
     if (found & 0b100) {
-      founds[0] = 1;
       angles[0] = curr_angle;
       Serial.print("found red ");
-      // found_beacons++;
     }
     if (found & 0b010) {
-      founds[1] = 1;
       angles[1] = curr_angle;
       Serial.print("found yellow ");
-      // found_beacons++;
     }
     if (found & 0b001) {
-      founds[2] = 1;
       angles[2] = curr_angle;
       Serial.print("found blue ");
-      // found_beacons++;
     }
 
     Serial.printf("Found beacons %x: R %i Y %i B %i\n", found, pixels[0], pixels[1], pixels[2]);
     Serial.printf("Current angle %.2f\n", curr_angle);
+
     // all beacons have been found
-    if (found_beacons == 3) break;
+    if (founds[0] && founds[1] && founds[2]) break;
 
     turnAngle(angleStep);
     curr_angle += angleStep;
