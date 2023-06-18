@@ -62,6 +62,11 @@ void setDir(bool direction){
   digitalWrite(DIRLpin, direction);
 }
 
+void moveAt(double speed){
+  setRPM(speed);
+  setDir(speed > 0);
+}
+
 void ARDUINO_ISR_ATTR stepISR(){
   if (isStep) {
     digitalWrite(STPRpin, HIGH);
@@ -123,10 +128,31 @@ void setup() {
 }
 
 long int stepCounter = 0;
+int speed = 10;
 
 void loop() {
   if(Serial.available()){
     switch(Serial.read()){
+      case 'w': {
+        moveAt(speed);
+        break;
+      }
+      case 's': {
+        moveAt(-speed);
+        break;
+      }
+      case 'a': {
+        turnBy(-10, speed);
+        break;
+      }
+      case 'd': {
+        turnBy(10, speed);
+        break;
+      }
+      case ' ': {
+        moveAt(0);
+        break;
+      }
       case ('t'): {
         Serial.println("Insert turning amount");
         double angle = Serial.parseFloat();
@@ -136,8 +162,7 @@ void loop() {
       case ('r'): {
         Serial.println("Set rpm amount");
         double rpm = Serial.parseFloat();
-        setRPM(rpm);
-        setDir(rpm > 0);
+        moveAt(rpm);
         Serial.printf("Set Speed to: %.2f\n", rpm);
         break; }
       default:
