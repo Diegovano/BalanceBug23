@@ -1,5 +1,11 @@
 #include <Arduino.h>
 
+#include "secrets.hpp"
+
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+
 #define STEP_PER_REVOLUTION 3200
 
 const float WHEEL_RADIUS = 3.5;
@@ -31,6 +37,21 @@ enum direction
 {
   FW, BCK, L, R, S
 };
+
+// WI-FI
+// #define WIFI_SSID "iPhone di Luigi"
+// #define WIFI_PASSWORD "chungusVBD"
+// #define SERVER_IP "54.82.44.87"
+
+
+const String SERVER_IP = "192.168.0.99";
+const String HTTP_PORT = "3001";
+
+const String motorEndPoint = "http://" + SERVER_IP + ":" + HTTP_PORT + "/api/motor";
+
+WiFiClient client;
+HTTPClient http;
+
 
 void setDelay(long int delay){
   if (delay == 0 && timerAlarmEnabled(step_timer)){
@@ -96,18 +117,43 @@ void resetSteps(){
 void handleNewDirection(direction prevD){
   int steps = getSteps();
   resetSteps();
+
+  
+  String payload = "";
+
   if (prevD == FW || prevD == BCK){
     double dist = ( double(steps) / STEP_PER_REVOLUTION ) * ( 2 * PI * WHEEL_RADIUS);
-    if(prevD == FW) Serial.printf("FW by %.2f cm", dist);
-    else Serial.printf("BCK by %.2f cm", dist);
+    if(prevD == FW) Serial.printf("FW by %.2f cm\n", dist);
+    else Serial.printf("BCK by %.2f cm\n", dist);
+
+    payload = "{\"type\":\"distance\",\"value\":" + (prevD == FW ? String(dist) : String(-dist)) + "}";
   } else if (prevD == L || prevD == R) {
     double angle = steps * (asin((2 * PI * WHEEL_RADIUS) / (WHEEL_CENTRE_OFFSET * STEP_PER_REVOLUTION)) * 180/PI);  // thanks diego
-    if(prevD == L) Serial.printf("Left by %.2f degrees", angle);
-    else Serial.printf("Right by %.2f degrees", angle);
+    if(prevD == L) Serial.printf("Left by %.2f degrees\n", angle);
+    else Serial.printf("Right by %.2f degrees\n", angle);
+
+    payload = "{\"type\":\"angle\",\"value\":" + (prevD == R ? String(angle) : String(-angle)) + "}";
   } else {
-    Serial.printf("Remained still, %i steps", steps);
+    // Serial.printf("Remained still, %i steps\n", steps);
   }
-  Serial.print('\n');
+
+  if (payload != ""){
+    http.begin(client, motorEndPoint);
+    http.addHeader("Content-Type", "application/json");
+    int httpResponseCode = http.POST(payload);
+
+    if (httpResponseCode > 0)
+    {
+      String response = http.getString();
+      Serial.println("[motor positions] POST Response code: " + String(httpResponseCode) + "," + response);
+      // Serial.println("Response: " + response);
+    }
+    else
+    {
+      Serial.println("Error sending POST request");
+    }
+    http.end();
+  }
 }
 
 void ARDUINO_ISR_ATTR stepISR(){
@@ -167,6 +213,20 @@ void setup() {
   timerAttachInterrupt(control_timer, &controlISR, true);
   timerAlarmWrite(control_timer, 1000 , true);
   timerAlarmEnable(control_timer);
+
+  // Wifi Setup
+  pinMode(LED_BUILTIN, OUTPUT);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.println("Connecting to Wi-Fi");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+    delay(500);
+  }
+  Serial.print("Connected to WiFi as");
+  Serial.println(WiFi.localIP());
+  digitalWrite(LED_BUILTIN, HIGH);
 }
 
 long int stepCounter = 0;
