@@ -19,12 +19,18 @@ hw_timer_t * control_timer = NULL;
 portMUX_TYPE controlTimerMux = portMUX_INITIALIZER_UNLOCKED;
 
 
-// STEP HANDLING
+// ISR TEP HANDLING
 volatile bool isStep = 0;
 volatile int ISRstepCounter = 0;
 volatile int ISRdegreeStepCount = 0;
 volatile bool ISRdegreeControl = 0;
 volatile long int ISRcontrolStepCounter = 0;
+
+// HEADING AND DISTANCE TRACKING
+enum direction 
+{
+  FW, BCK, L, R, S
+};
 
 void setDelay(long int delay){
   if (delay == 0 && timerAlarmEnabled(step_timer)){
@@ -67,6 +73,43 @@ void moveAt(double speed){
   setDir(speed > 0);
 }
 
+void turnAt(double speed){
+  setRPM(speed);
+  digitalWrite(DIRRpin, speed < 0);
+  digitalWrite(DIRLpin, speed > 0);
+}
+
+int getSteps(){
+  uint32_t steps = 0;
+  portENTER_CRITICAL(&stepTimerMux);
+  steps = ISRstepCounter;
+  portEXIT_CRITICAL(&stepTimerMux);
+  return steps;
+}
+
+void resetSteps(){
+  portENTER_CRITICAL(&stepTimerMux);
+  ISRstepCounter = 0;
+  portEXIT_CRITICAL(&stepTimerMux);
+}
+
+void handleNewDirection(direction prevD){
+  int steps = getSteps();
+  resetSteps();
+  if (prevD == FW || prevD == BCK){
+    double dist = ( double(steps) / STEP_PER_REVOLUTION ) * ( 2 * PI * WHEEL_RADIUS);
+    if(prevD == FW) Serial.printf("FW by %.2f cm", dist);
+    else Serial.printf("BCK by %.2f cm", dist);
+  } else if (prevD == L || prevD == R) {
+    double angle = steps * (asin((2 * PI * WHEEL_RADIUS) / (WHEEL_CENTRE_OFFSET * STEP_PER_REVOLUTION)) * 180/PI);  // thanks diego
+    if(prevD == L) Serial.printf("Left by %.2f degrees", angle);
+    else Serial.printf("Right by %.2f degrees", angle);
+  } else {
+    Serial.printf("Remained still, %i steps", steps);
+  }
+  Serial.print('\n');
+}
+
 void ARDUINO_ISR_ATTR stepISR(){
   if (isStep) {
     digitalWrite(STPRpin, HIGH);
@@ -88,7 +131,6 @@ void ARDUINO_ISR_ATTR controlISR(){
   portENTER_CRITICAL(&stepTimerMux);
   ISRstepDiff = ISRstepCounter - ISRcontrolStepCounter;
   ISRcontrolStepCounter = ISRstepCounter;
-  // Serial.printf("[ctrl]%i,%i\n", ISRstepDiff, ISRcontrolStepCounter);
   portEXIT_CRITICAL(&stepTimerMux);
 
 
@@ -129,27 +171,34 @@ void setup() {
 
 long int stepCounter = 0;
 int speed = 10;
+direction dir = S;
 
 void loop() {
   if(Serial.available()){
+    handleNewDirection(dir);
     switch(Serial.read()){
       case 'w': {
+        dir = FW;
         moveAt(speed);
         break;
       }
       case 's': {
+        dir = BCK;
         moveAt(-speed);
         break;
       }
       case 'a': {
-        turnBy(-10, speed);
+        dir = L;
+        turnAt(-speed);
         break;
       }
       case 'd': {
-        turnBy(10, speed);
+        dir = R;
+        turnAt(speed);
         break;
       }
       case ' ': {
+        dir = S;
         moveAt(0);
         break;
       }
@@ -167,15 +216,10 @@ void loop() {
         break; }
       default:
         Serial.println("Option invalid");
+        dir = S;
+        moveAt(0);
     }
-  }
+  } 
 
-  // Step counting
-  // uint32_t ISRstepCount = 0;
-  // portENTER_CRITICAL(&stepTimerMux);
-  // ISRstepCount = ISRstepCounter;
-  // portEXIT_CRITICAL(&stepTimerMux);
-
-  // Serial.printf("Performed %i steps, total %i\n", ISRstepCount - stepCounter, stepCounter = ISRstepCount);
-  delay(100);
+  delay(10);
 }
