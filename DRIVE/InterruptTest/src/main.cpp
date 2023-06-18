@@ -49,8 +49,15 @@ const String HTTP_PORT = "3001";
 
 const String motorEndPoint = "http://" + SERVER_IP + ":" + HTTP_PORT + "/api/motor";
 
-WiFiClient client;
 HTTPClient http;
+
+// struct to pass to task scheduler for motor data
+// type is 0 for angle, 1 for distance
+// value is the double variable
+typedef struct {
+  int type;
+  double val;
+} motorParams;
 
 
 void setDelay(long int delay){
@@ -114,45 +121,78 @@ void resetSteps(){
   portEXIT_CRITICAL(&stepTimerMux);
 }
 
+void POSTmotorVals(void * payload) {
+  Serial.println("[POST motor pos] Starting task");
+  motorParams *data = (motorParams*)payload; // dodgy pointer casting
+
+  String msgType = "";
+  if (data->type == 0) msgType = "angle";
+  else if (data->type == 1) msgType = "distance";
+  String JSONdata = "{\"type\":\"" + msgType + "\",\"value\":" + String(data->val) + "}";
+  
+  http.begin(motorEndPoint);
+  http.addHeader("Content-Type", "application/json");
+  int httpResponseCode = http.POST(JSONdata);
+
+  Serial.print("[POST motor pos]");
+  if (httpResponseCode > 0)
+  {
+    String response = http.getString();
+    Serial.print(" POST Response code: " + String(httpResponseCode));
+    Serial.println("Response: " + response);
+  }
+  else
+  {
+    Serial.println(" Error sending POST request");
+  }
+  http.end();
+
+  // delete parameters to avoid mem leak
+  free(data);
+
+  vTaskDelete(NULL);
+}
+
 void handleNewDirection(direction prevD){
   int steps = getSteps();
   resetSteps();
 
-  
-  String payload = "";
+  // allocate on heap so it can be used to xcreatetask
+  motorParams *payload = new motorParams();
+  payload->type = -1;
 
   if (prevD == FW || prevD == BCK){
     double dist = ( double(steps) / STEP_PER_REVOLUTION ) * ( 2 * PI * WHEEL_RADIUS);
     if(prevD == FW) Serial.printf("FW by %.2f cm\n", dist);
     else Serial.printf("BCK by %.2f cm\n", dist);
 
-    payload = "{\"type\":\"distance\",\"value\":" + (prevD == FW ? String(dist) : String(-dist)) + "}";
+    payload->type = 1;
+    payload->val = (prevD == FW ? dist : -dist);
+    // payload = "{\"type\":\"distance\",\"value\":" + (prevD == FW ? String(dist) : String(-dist)) + "}";
   } else if (prevD == L || prevD == R) {
     double angle = steps * (asin((2 * PI * WHEEL_RADIUS) / (WHEEL_CENTRE_OFFSET * STEP_PER_REVOLUTION)) * 180/PI);  // thanks diego
     if(prevD == L) Serial.printf("Left by %.2f degrees\n", angle);
     else Serial.printf("Right by %.2f degrees\n", angle);
 
-    payload = "{\"type\":\"angle\",\"value\":" + (prevD == R ? String(angle) : String(-angle)) + "}";
+
+    payload->type = 0;
+    payload->val = (prevD == R ? angle : -angle);
+    // payload = "{\"type\":\"angle\",\"value\":" + (prevD == R ? String(angle) : String(-angle)) + "}";
   } else {
     // Serial.printf("Remained still, %i steps\n", steps);
   }
 
-  if (payload != ""){
-    http.begin(client, motorEndPoint);
-    http.addHeader("Content-Type", "application/json");
-    int httpResponseCode = http.POST(payload);
 
-    if (httpResponseCode > 0)
-    {
-      String response = http.getString();
-      Serial.println("[motor positions] POST Response code: " + String(httpResponseCode) + "," + response);
-      // Serial.println("Response: " + response);
-    }
-    else
-    {
-      Serial.println("Error sending POST request");
-    }
-    http.end();
+  if (payload->type != -1){
+    Serial.println("Starting POST task");
+    xTaskCreate(
+      POSTmotorVals,
+      "Send movement info",
+      2000,
+      (void*) payload,
+      1,
+      NULL
+    );    
   }
 }
 
@@ -281,5 +321,5 @@ void loop() {
     }
   } 
 
-  delay(10);
+  delay(50);
 }
