@@ -16,17 +16,7 @@ const int DIRLpin = 33;
 
 float kp, ki, kd, kpp;
 
-TaskHandle_t stepTask;
-TaskHandle_t otherTasks;
-
-Adafruit_MPU6050 mpu;
-QMC5883LCompass compass;
-
 unsigned long time123;
-
-double filter0[10] = {0, 0, 0, 0, 0};
-double filter1[10] = {0, 0, 0, 0, 0};
-int filterpos = 0;
 
 unsigned long lastTime;
 
@@ -97,8 +87,6 @@ public:
   }
 };
 
-PID *innerController;
-
 enum direction
 {
   BCK, FWD
@@ -116,19 +104,22 @@ class motor
   direction dir;
   microstep stepping;
 public:
-  motor(const int pinStepSet, const int pinDirSet, microstep stepSet = SIXT) : stpPin(pinStepSet), dirPin(pinDirSet), stepping(stepSet)
-  { }
+  motor(const int pinStepSet, const int pinDirSet) : stpPin(pinStepSet), dirPin(pinDirSet)
+  { 
+    pinMode(pinStepSet, OUTPUT);
+    pinMode(pinDirSet, OUTPUT);
+    digitalWrite(pinStepSet, LOW);
+    digitalWrite(pinDirSet, HIGH);
+  }
 
   void step()
   {
     digitalWrite(stpPin, HIGH);
   }
 
-  void setStep(microstep stepSet)
+  void setLow()
   {
-    stepping = stepSet;
-
-    // need code here to set pins
+    digitalWrite(stpPin, LOW);
   }
 
   void setDir(direction dir)
@@ -136,30 +127,30 @@ public:
     if (dir == BCK) digitalWrite(dirPin, HIGH);
     else digitalWrite(dirPin, LOW);
   }
-
-  void setLow()
-  {
-    digitalWrite(stpPin, LOW);
-  }
 };
-
-motor left(STPLpin, DIRLpin, QUAR);
-motor right(STPRpin, DIRRpin, QUAR);
 
 double rpm;
 double accel;
-int delaymu;
 
 /// @brief The function which will run on core 1 (application core).
 /// This function steps with appropriate delay to acheive the speed as defined by delaymu. This is calculated based on rpm.
-/// @param _param Not used
-void motorCode(void *_param)
+/// @param motors array of both motor objects
+void motorCode(void *motors)
 {
   Serial.print("Starting Motor Code on Core ");
   Serial.println(xPortGetCoreID());
 
+  motor left = ((motor *)motors)[0];
+  motor right = ((motor *)motors)[1];
+
+  int delaymu = 0;
+
   while( true ) // loop to run in core
   {
+    if (rpm != 0)
+    {
+      delaymu = 1e6 * 60 / (abs(rpm) * 3200); // cast to int
+    }
     if (rpm != 0 && delaymu != 0)
     {
       if (rpm < 0)
@@ -189,12 +180,18 @@ void motorCode(void *_param)
 /// @brief The function which will run on core 0 (other core).
 /// This function recomputes the values which ultimately drive the motors, based on the control algorithm.
 /// @param _param Not used
-void controlCode(void *_param)
+void controlCode(void *mpu)
 {
   Serial.print("Starting Control Code on Core ");
   Serial.println(xPortGetCoreID());
 
   int fake_bandwidth_watchdog = 0;
+  
+  unsigned int filterpos = 0;
+  double filter0[10];
+  double filter1[10];
+
+  PID innerController(kp, ki, kd, 0);
 
   while (true)
   {
@@ -219,7 +216,7 @@ void controlCode(void *_param)
       rpm = 0;
       accel = 0;
       
-      innerController->setgain(kp, ki, kd);
+      innerController.setgain(kp, ki, kd);
     #endif
     }
 
@@ -230,7 +227,7 @@ void controlCode(void *_param)
     // *****************************
 
     sensors_event_t a, g, temp;
-    mpu.getEvent(&a, &g, &temp);
+    ((Adafruit_MPU6050*)mpu)->getEvent(&a, &g, &temp);
 
     // mpu.setI2CBypass(true);
     // compass.read();
@@ -258,7 +255,7 @@ void controlCode(void *_param)
     double accelPitch2 = -atan2(a.acceleration.x, sqrt(a.acceleration.z*a.acceleration.z + a.acceleration.y*a.acceleration.y))*180/PI;
     double gyroPitch = g.gyro.x * 0.004;
 
-    double trigPitch = -(acos(max(-1.0, min(1.0, gravTorque/9.81))) * 180/3.1415 - 90);
+    double trigPitch = -(acos(max(-1.0, min(1.0, gravTorque/9.81))) * 180/PI - 90);
     double compPitch = (0.1 * (compPitch + gyroPitch) + 0.9 * accelPitch);
 
     // BIAS
@@ -290,8 +287,8 @@ void controlCode(void *_param)
     rateError = rateSetpoint - rate;
 
     // innerController->setSetpoint(rateSetpoint);
-    innerController->setSetpoint(pitchSetpoint);
-    double reqRpm = (double)innerController->compute(trigPitch);
+    innerController.setSetpoint(pitchSetpoint);
+    double reqRpm = (double)innerController.compute(trigPitch);
     rpm = abs(reqRpm) < MAX_SPEED ? reqRpm : ((reqRpm > 0) - (reqRpm < 0)) * MAX_SPEED;
 
 
@@ -308,11 +305,6 @@ void controlCode(void *_param)
     }
 
     // Serial.println(rpm);
-
-    if ((int)rpm != 0)
-    {
-      delaymu = 1e6 * 60 / (abs(rpm) * 3200); // cast to int
-    }
 
     // *****************************
     //
@@ -351,10 +343,13 @@ void setup() {
   Serial.begin(115200);
   Serial.println("starting!");
 
-  pinMode(STPRpin, OUTPUT);
-  pinMode(STPLpin, OUTPUT);
-  pinMode(DIRRpin, OUTPUT);
-  pinMode(DIRLpin, OUTPUT);
+  motor left(STPLpin, DIRLpin);
+  motor right(STPRpin, DIRRpin);
+
+  motor motors[2] = { left, right };
+
+  Adafruit_MPU6050 mpu;
+  QMC5883LCompass compass;
 
   rpm = 0;
   accel = 0;
@@ -363,8 +358,6 @@ void setup() {
   ki = 0.0001;
   kd = 0.00000001;
   kpp = 1;
-
-  innerController = new PID(kp, ki, kd, 0);
 
   if (!mpu.begin()) Serial.println("Failed to find MPU6050 chip");
   else 
@@ -379,11 +372,14 @@ void setup() {
     mpu.setI2CBypass(false);
   }
 
+  TaskHandle_t stepTask;
+  TaskHandle_t otherTasks;
+
   xTaskCreatePinnedToCore(
     controlCode,
     "Controller Code",
     4096,
-    NULL,
+    &mpu, // mpu only for now
     tskIDLE_PRIORITY,
     &otherTasks,
     0);
@@ -394,13 +390,12 @@ void setup() {
     motorCode,
     "MotorSteppingCode",
     4096,
-    NULL,
+    motors,
     10,
     &stepTask,
     1);
     
   vTaskDelete(NULL);
-  delete innerController;
 }
 
 void loop() 
