@@ -7,6 +7,8 @@
 #include <Wire.h>
 #include <string>
 
+#define WIFI false
+
 #define WIFI_SSID "Diego-XPS"
 #define WIFI_PASSWORD "helloGitHub!"
 #define SERVER_IP "54.82.44.87"
@@ -413,6 +415,8 @@ void setup() {
 
   Serial.begin(115200);
   Serial.println("starting!");
+  
+  #if WIFI
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.println("Connecting to Wi-Fi");
 
@@ -424,6 +428,7 @@ void setup() {
   Serial.print("Connected to WiFi as");
   Serial.println(WiFi.localIP());
   digitalWrite(LED_BUILTIN, HIGH);
+  #endif
 
   rpm = 0;
   accel = 0;
@@ -446,9 +451,24 @@ void setup() {
     mpu.setI2CBypass(false);
   }
 
-  TaskHandle_t stepTask;
-  TaskHandle_t otherTasks;
   TaskHandle_t pollTask;
+  TaskHandle_t otherTasks;
+  TaskHandle_t stepTask;
+
+  #if WIFI
+
+  xTaskCreatePinnedToCore(
+    pollServerForDistance,
+    "ServerPollCode",
+    4096,
+    NULL,
+    1,
+    &pollTask,
+    0);
+
+  #endif
+
+  delay(500);
 
   xTaskCreatePinnedToCore(
     controlCode,
