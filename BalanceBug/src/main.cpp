@@ -30,6 +30,7 @@ const int STPLpin = 32;
 const int DIRLpin = 33;
 
 float kp, ki, kd, kpp;
+int delaymu = 0;
 
 unsigned long time123;
 
@@ -158,14 +159,8 @@ void motorCode(void *motors)
   motor left = ((motor *)motors)[0];
   motor right = ((motor *)motors)[1];
 
-  int delaymu = 0;
-
   while( true ) // loop to run in core
   {
-    if (rpm != 0)
-    {
-      delaymu = 1e6 * 60 / (abs(rpm) * 3200); // cast to int
-    }
     if (rpm != 0 && delaymu != 0)
     {
       if (rpm < 0)
@@ -358,6 +353,11 @@ void controlCode(void *mpu)
       if ( rpm + accel_step > MAX_SPEED && accel_step > 0 ) rpm = MAX_SPEED;
       else if (rpm + accel_step < -MAX_SPEED && accel_step < 0) rpm = -MAX_SPEED;
       else rpm += accel_step;
+    }
+
+    if (rpm != 0)
+    {
+      delaymu = 1e6 * 60 / (abs(rpm) * 3200); // cast to int
     }
 
     // Serial.println(rpm);
