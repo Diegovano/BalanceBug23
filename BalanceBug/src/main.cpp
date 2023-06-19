@@ -7,7 +7,6 @@
 #include <Wire.h>
 #include <string>
 
-#define WIFI false
 
 #define WIFI_SSID "Diego-XPS"
 #define WIFI_PASSWORD "helloGitHub!"
@@ -15,14 +14,18 @@
 #define HTTP_PORT "3001"
 
 #define MANUAL_SPEED_CONTORL false
-#define PLOTTING false
+#define PLOTTING true
+#define WIFI false
 
 std::string posURL = "http://" + std::string(SERVER_IP) + ':' + std::string(HTTP_PORT) + "/posRequest";
 
 HTTPClient http;
 
 const int MAX_ACCEL = 1500;
-const int MAX_SPEED = 100;
+const int MAX_SPEED = 150;
+const int MIN_SPEED = 0.1;
+const int MIN_DELAYMU = 1e6 * 60 / (abs(MIN_SPEED) * 3200); // cast to int
+
 
 const int STPRpin = 25;
 const int DIRRpin = 26;
@@ -156,12 +159,15 @@ void motorCode(void *motors)
   Serial.print("Starting Motor Code on Core ");
   Serial.println(xPortGetCoreID());
 
-  motor left = ((motor *)motors)[0];
-  motor right = ((motor *)motors)[1];
+  // motor left = ((motor **)motors)[0];
+  // motor right = ((motor **)motors)[1];
+
+  motor left(STPLpin, DIRLpin);
+  motor right(STPRpin, DIRRpin);
 
   while( true ) // loop to run in core
   {
-    if (rpm != 0 && delaymu != 0)
+    if (rpm != 0 && delaymu != 0 && delaymu < MIN_DELAYMU)
     {
       if (rpm < 0)
       {
@@ -202,7 +208,9 @@ void pollServerForDistance(void *_param)
       do  
       {
         Serial.print(".");
+        #ifdef LED_BUILTIN 
         digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+        #endif
         vTaskDelay(500);
       } while (WiFi.status() != WL_CONNECTED);
     }
@@ -239,7 +247,7 @@ void controlCode(void *mpu)
   int fake_bandwidth_watchdog = 0;
   
   unsigned int filterpos = 0;
-  double filter0[10];
+  double filter0[5];
   double filter1[10];
 
   PID innerController(kp, ki, kd, 0);
@@ -286,21 +294,23 @@ void controlCode(void *mpu)
 
     // double trigpitch = acos(max(-1.0f, min(1.0f, a.acceleration.x/9.81f))) * 180/3.1415f - 90;
 
-    filter0[filterpos%10] = a.acceleration.x;
+    filter0[filterpos++%5] = a.acceleration.x;
     double sum = 0;
-    for(int i = 0; i < 10; i++)
+    for(int i = 0; i < 5; i++)
     { 
       sum += filter0[i];
     }
-    double gravTorque = sum / 10;
+    double gravTorque = sum / 5;
+    // double gravTorque = a.acceleration.x;
     
-    filter1[++filterpos%10] = g.gyro.x;
-    sum = 0;
-    for(int i = 0; i < 10; i++)
-    { 
-      sum += filter1[i];
-    }
-    double rate = sum + 1.01f;
+    // filter1[++filterpos%10] = g.gyro.x;
+    // sum = 0;
+    // for(int i = 0; i < 10; i++)
+    // { 
+    //   sum += filter1[i];
+    // }
+    // double rate = sum + 1.01f;
+    double rate = g.gyro.x;
 
     double accelPitch = atan(a.acceleration.x/a.acceleration.z)*180/PI;
     double accelPitch2 = -atan2(a.acceleration.x, sqrt(a.acceleration.z*a.acceleration.z + a.acceleration.y*a.acceleration.y))*180/PI;
@@ -404,14 +414,16 @@ void controlCode(void *mpu)
 }
 
 void setup() {
-  motor left(STPLpin, DIRLpin);
-  motor right(STPRpin, DIRRpin);
+  motor *left = new motor(STPLpin, DIRLpin);
+  motor *right = new motor(STPRpin, DIRRpin);
 
-  motor motors[2] = { left, right };
+  motor *motors[2] = { left, right };
 
   Adafruit_MPU6050 mpu;
   QMC5883LCompass compass;
+  #ifdef LED_BUILTIN
   pinMode(LED_BUILTIN, OUTPUT);
+  #endif
 
   Serial.begin(115200);
   Serial.println("starting!");
@@ -422,12 +434,16 @@ void setup() {
 
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
+    #ifdef LED_BUILTIN
     digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+    #endif
     delay(500);
   }
   Serial.print("Connected to WiFi as");
   Serial.println(WiFi.localIP());
+  #ifdef LED_BUILTIN
   digitalWrite(LED_BUILTIN, HIGH);
+  #endif
   #endif
 
   rpm = 0;
