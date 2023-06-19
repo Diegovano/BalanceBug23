@@ -1,11 +1,9 @@
 #include <Arduino.h>
 
-#include "secrets.hpp"
-
 #include <WiFi.h>
 #include <HTTPClient.h>
 
-
+#define USE_WIFI false
 #define STEP_PER_REVOLUTION 3200
 
 const float WHEEL_RADIUS = 3.5;
@@ -18,10 +16,10 @@ const int STPLpin = 32;
 const int DIRLpin = 33;
 
 // TIMER DEFINITIONS
-hw_timer_t * step_timer = NULL;
+hw_timer_t *step_timer = NULL;
 portMUX_TYPE stepTimerMux = portMUX_INITIALIZER_UNLOCKED;
 
-hw_timer_t * control_timer = NULL;
+hw_timer_t *control_timer = NULL;
 portMUX_TYPE controlTimerMux = portMUX_INITIALIZER_UNLOCKED;
 
 
@@ -38,11 +36,10 @@ enum direction
   FW, BCK, L, R, S
 };
 
-// WI-FI
-// #define WIFI_SSID "iPhone di Luigi"
-// #define WIFI_PASSWORD "chungusVBD"
-// #define SERVER_IP "54.82.44.87"
-
+#if USE_WIFI
+#define WIFI_SSID "iPhone di Luigi"
+#define WIFI_PASSWORD "chungusVBD"
+#define SERVER_IP "54.82.44.87"
 
 const String SERVER_IP = "192.168.0.99";
 const String HTTP_PORT = "3001";
@@ -50,6 +47,7 @@ const String HTTP_PORT = "3001";
 const String motorEndPoint = "http://" + SERVER_IP + ":" + HTTP_PORT + "/api/motor";
 
 HTTPClient http;
+#endif
 
 // struct to pass to task scheduler for motor data
 // type is 0 for angle, 1 for distance
@@ -122,6 +120,7 @@ void resetSteps(){
 }
 
 void POSTmotorVals(void * payload) {
+  #if USE_WIFI
   Serial.println("[POST motor pos] Starting task");
   motorParams *data = (motorParams*)payload; // dodgy pointer casting
 
@@ -151,6 +150,9 @@ void POSTmotorVals(void * payload) {
   free(data);
 
   vTaskDelete(NULL);
+  #else
+  Serial.println("Cannot POST: WiFi deactivated!");
+  #endif
 }
 
 void handleNewDirection(direction prevD){
@@ -182,7 +184,7 @@ void handleNewDirection(direction prevD){
     // Serial.printf("Remained still, %i steps\n", steps);
   }
 
-
+  #if USE_WIFI
   if (payload->type != -1){
     Serial.println("Starting POST task");
     xTaskCreate(
@@ -194,6 +196,7 @@ void handleNewDirection(direction prevD){
       NULL
     );    
   }
+  #endif
 }
 
 void ARDUINO_ISR_ATTR stepISR(){
@@ -255,6 +258,7 @@ void setup() {
   timerAlarmEnable(control_timer);
 
   // Wifi Setup
+  #if USE_WIFI
   pinMode(LED_BUILTIN, OUTPUT);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.println("Connecting to Wi-Fi");
@@ -267,6 +271,7 @@ void setup() {
   Serial.print("Connected to WiFi as");
   Serial.println(WiFi.localIP());
   digitalWrite(LED_BUILTIN, HIGH);
+  #endif
 }
 
 long int stepCounter = 0;
