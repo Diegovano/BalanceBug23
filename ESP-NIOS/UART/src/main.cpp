@@ -44,7 +44,7 @@ int findBeacons(int headings[3]);
 const double stepsPerRevolution = 2037.8864;
 Stepper myStepper(stepsPerRevolution, IN1, IN3, IN2, IN4);
 
-void cameraSpin(double angle);
+int cameraSpin(double angle);
 
 void setup() {
   Serial.begin(115200);
@@ -68,7 +68,10 @@ void setup() {
   pinMode(NIOS_RESET_PIN, OUTPUT);
   reset_NIOS();
 
+  delay(100);
+
   NIOS.begin(115200, SERIAL_8N1, 16, 17); 
+  NIOS.printf("Hello from ESP\n");
   while (!NIOS.available()) {
     delay(500);
     Serial.println("Waiting for message from NIOS");
@@ -94,19 +97,30 @@ void loop() {
   }
 
   if (spinCamera) {
-    reset_NIOS();
+    // reset_NIOS();
     
-    while (!NIOS.available()) {
-      delay(500);
-      Serial.print(".");
-    }
+    // while (!NIOS.available()) {
+    //   delay(500);
+    //   Serial.print(".");
+    // }
     while (NIOS.available()){
       Serial.print("Connected:");
       Serial.println(NIOS.readString());
     }
 
     Serial.println("Starting Resectioning!");
-    cameraSpin(45);
+    while(cameraSpin(45) == -1){
+      Serial.println("[main] Camera spin failed, resetting NIOS");
+      reset_NIOS();
+      while (!NIOS.available()) {
+        delay(500);
+        Serial.println(".");
+      }
+      while (NIOS.available()){
+        Serial.println("Recevied from NIOS:");
+        Serial.println(NIOS.readString());
+      }
+    }
     spinCamera = 0;
   }
     
@@ -129,17 +143,18 @@ void reset_NIOS() {
 
 void setRED(){
   // RED
-  NIOS.printf("E%08x\n", 0x3D0);
+  NIOS.printf("E%08x\n", 0x2D0);
   delay(50);
-  NIOS.printf("G%08x\n", 0x0);
+  NIOS.printf("G%08x\n", 0x040);
   delay(50);
-  NIOS.printf("H%08x\n", 0xFF0000);
+  NIOS.printf("H%08x\n", 0xEE2200);
   delay(50);
-  NIOS.printf("T%08x\n", 0x1e3d);
+  NIOS.printf("T%08x\n", 0x1d3d);
   delay(50);
   NIOS.printf("A%08x\n", 0x1);
   delay(50);
   NIOS.printf("P%08x\n", 10);
+  delay(50);
 }
 
 void setBLUE(){
@@ -155,21 +170,23 @@ void setBLUE(){
   NIOS.printf("A%08x\n", 0x1);
   delay(50);
   NIOS.printf("P%08x\n", 10);
+  delay(50);
 } 
 
 void setYELLOW(){
   // YELLOW
-  NIOS.printf("E%08x\n", 0xd80);
+  NIOS.printf("E%08x\n", 0xe80);
   delay(50);
-  NIOS.printf("G%08x\n", 0x0);
+  NIOS.printf("G%08x\n", 0x040);
   delay(50);
-  NIOS.printf("H%08x\n", 0xEEFF00);
+  NIOS.printf("H%08x\n", 0xFFFF1f);
   delay(50);
   NIOS.printf("T%08x\n", 0x1d15);
   delay(50);
   NIOS.printf("A%08x\n", 0x5);
   delay(50);
-  NIOS.printf("P%08x\n", 20);
+  NIOS.printf("P%08x\n", 10);
+  delay(50);
 }
 
 // Turn the stepper motor by an angle
@@ -177,7 +194,7 @@ void setYELLOW(){
 void turnAngle(double angle){
   int num_steps = int(angle * stepsPerRevolution / 360);
   #if DEBUG
-  Serial.printf("Turning %.2f degrees, %i steps", angle, num_steps);
+  Serial.printf("[Stepper Control] Turning %.2f degrees, %i steps\n", angle, num_steps);
   #endif
   myStepper.setSpeed(STEPPER_SPEED);
   myStepper.step(num_steps);
@@ -194,10 +211,9 @@ int hex2int(char byte) {
 // function that polls the nios to check for the presence of beacons
 // writes the pixel value to the array param
 // return 3 bits where each bit represents the red, yellow blue (100) means only red was found
-int findBeacons(int headings[3]){
+int findBeacons(int headings[3], bool detected[3]){
   int found = 0;
   int pixel = 0;
-
 
   for(int i = 0; i < 3; i++){
     found = found << 1; // shift left by 1
@@ -206,82 +222,87 @@ int findBeacons(int headings[3]){
     else if (i == 1) strcpy(colour, "yellow");
     else if (i == 2) strcpy(colour, "blue");
 
-    // check for yellow
-    #if DEBUG
-    Serial.printf("Searching for %s\n", colour);
-    #endif  
+    if(!detected[i]){
+      // check for yellow
+      #if DEBUG
+      Serial.printf("Searching for %s \n", colour);
+      #endif  
 
-    if (i == 0) setRED();
-    else if (i == 1) setYELLOW();
-    else if (i == 2) setBLUE();
+      if (i == 0) setRED();
+      else if (i == 1) setYELLOW();
+      else if (i == 2) setBLUE();
 
-    delay(100);
+      delay(300);
 
-    // Serial.println(NIOS.readString()); // buff flush
-    // NIOS.readString();
-    NIOS.printf("B"); // request Beacons information
-    while(!NIOS.available()){delay(1);} // wait for information to come back
+      // Serial.println(NIOS.readString()); // buff flush
+      // NIOS.readString();
+      NIOS.printf("B"); // request Beacons information
+      delay(20);
+      while(!NIOS.available()){delay(1);} // wait for information to come back
 
-    if(NIOS.available()){
-      char in = NIOS.read();
-      // find out if the colour was present
-      if (in != 'D') {
-        Serial.printf("NIOS %s read failed, %c\n", colour, in);
-        return -1;
-      }
-
-      in = NIOS.read(); // 0 or 1 based on if the beacons was found
-
-      if (in == '1'){
-        found = found | 1;
-        #if DEBUG
-        Serial.printf("%s Beacon Found ", colour);
-        #endif
-        in = NIOS.read();
-        if (in != 'B') {
-          Serial.printf("NIOS %s read failed, %c\n",colour,  in);
+      if(NIOS.available()){
+        char in = NIOS.read();
+        // find out if the colour was present
+        if (in != 'D') {
+          Serial.printf("NIOS %s read failed, %c\n", colour, in);
           return -1;
         }
-        pixel = 0;
-        // read pixel value
-        while((in = NIOS.read()) != '\n'){
-          pixel = pixel << 4 | hex2int(in);
+
+        in = NIOS.read(); // 0 or 1 based on if the beacons was found
+
+        if (in == '1'){
+          found = found | 1;
           #if DEBUG
-          Serial.printf("%i,%c", pixel, in);
+          Serial.printf("%s Beacon Found ", colour);
+          #endif
+          in = NIOS.read();
+          if (in != 'B') {
+            Serial.printf("NIOS %s read failed, %c\n",colour,  in);
+            return -1;
+          }
+          pixel = 0;
+          // read pixel value
+          while((in = NIOS.read()) != '\n'){
+            pixel = pixel << 4 | hex2int(in);
+            #if DEBUG
+            Serial.printf("%i,%c", pixel, in);
+            #endif
+          }
+          #if DEBUG
+          Serial.printf(" at position %i\n", pixel);
+          #endif
+
+          headings[i] = pixel;
+          detected[i] = 1;
+
+          #if DEBUG
+          // while((in = NIOS.read()) != '\n'){
+          //   Serial.print(in);
+          // }
+          // Serial.print('\n');
+          Serial.print(NIOS.readString());
+          #else
+          NIOS.readString(); // read to flush buffer;
+          #endif
+        } else {
+          #if DEBUG
+          Serial.printf("%s not found, ", colour);
+          Serial.println(NIOS.readString());
+          #else
+          NIOS.readString(); // read to flush buffer;
           #endif
         }
-        #if DEBUG
-        Serial.printf(" at position %i\n", pixel);
-        #endif
-
-        headings[i] = pixel;
-
-        #if DEBUG
-        // while((in = NIOS.read()) != '\n'){
-        //   Serial.print(in);
-        // }
-        // Serial.print('\n');
-        Serial.print(NIOS.readString());
-        #else
-        NIOS.readString(); // read to flush buffer;
-        #endif
-      } else {
-        #if DEBUG
-        Serial.printf("%s not found, ", colour);
-        Serial.println(NIOS.readString());
-        #else
-        NIOS.readString(); // read to flush buffer;
-        #endif
       }
+    } else {
+      Serial.printf("%s already found\n", colour);
+      Serial.println(NIOS.readString());
     }
-
     free(colour);
-    
   }
   return found;
 }
 
-void cameraSpin(double angleStep){
+int cameraSpin(double angleStep){
   // first turn the camera -180 to then be able to turn 360 and then -180 again
   turnAngle(-180);
 
@@ -306,31 +327,32 @@ void cameraSpin(double angleStep){
   // step through that many steps and measure lights
   for (int i = 0; i < num_turns; i++){
 
-    int found = findBeacons(pixels);
+    int found = findBeacons(pixels, founds);
+
+    if (found == -1 ){
+      Serial.println("[camera Spin] Beacon finding failed");
+      turnAngle(-curr_angle);
+      return -1;
+    }
 
     if (found & 0b100) {
-      founds[0] = 1;
       angles[0] = curr_angle;
-      Serial.print("found red ");
-      // found_beacons++;
+      Serial.print("[camera Spin] found red ");
     }
     if (found & 0b010) {
-      founds[1] = 1;
       angles[1] = curr_angle;
-      Serial.print("found yellow ");
-      // found_beacons++;
+      Serial.print("[camera Spin] found yellow ");
     }
     if (found & 0b001) {
-      founds[2] = 1;
       angles[2] = curr_angle;
-      Serial.print("found blue ");
-      // found_beacons++;
+      Serial.print("[camera Spin] found blue ");
     }
 
-    Serial.printf("Found beacons %x: R %i Y %i B %i\n", found, pixels[0], pixels[1], pixels[2]);
-    Serial.printf("Current angle %.2f\n", curr_angle);
+    Serial.printf("[camera Spin] Found beacons %x: R %i Y %i B %i\n", found, pixels[0], pixels[1], pixels[2]);
+    Serial.printf("[camera Spin] Current angle %.2f\n", curr_angle);
+
     // all beacons have been found
-    if (found_beacons == 3) break;
+    if (founds[0] && founds[1] && founds[2]) break;
 
     turnAngle(angleStep);
     curr_angle += angleStep;
@@ -346,7 +368,7 @@ void cameraSpin(double angleStep){
 
   char buffer[100];
 
-  sprintf(buffer, "distanceB=%i&distanceR=%i&distanceY=%i&rotationB=%i&rotationR=%i&rotationY=%i", pixels[0], pixels[1], pixels[2], (int) angles[0], (int) angles[1], (int) angles[2]);
+  sprintf(buffer, "distanceR=%i&distanceY=%i&distanceB=%i&rotationR=%i&rotationY=%i&rotationB=%i", pixels[0], pixels[1], pixels[2], (int) angles[0], (int) angles[1], (int) angles[2]);
 
   String getParams = String(buffer);
   String requestUrl = serverUrl;
@@ -369,13 +391,14 @@ void cameraSpin(double angleStep){
     Serial.println("Error sending GET request");
   }
   http.end();
+  return 0;
 }
 
 int pollServer(){
   http.begin(triangulationUrl);
   int httpResponseCodeTriangulation = http.GET();
 
-  if (httpResponseCodeTriangulation == HTTP_CODE_OK)
+  if (httpResponseCodeTriangulation != -1)
   {
     String response = http.getString();
     // Serial.println(response);
