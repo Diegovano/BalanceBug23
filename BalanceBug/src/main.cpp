@@ -106,10 +106,19 @@ Adafruit_MPU6050 mpu;
 
 // PID
 
-float kp = 1;
-float ki = 0;
-float kd = 0;
-float kpp = 1;
+float kpr = 500;
+float kir = 1;
+float kdr = 1;
+float kpp = 10;
+float last_value = 0;
+float integral_error = 0;
+float ur_max = 5000;
+
+float kps = 0;
+float kis = 0;
+float kds = 0;
+float us_max = 200;
+float speedSetpoint = 0;
 
 class PID
 {
@@ -122,13 +131,15 @@ private:
   float u0 = 0, u1 = 0;
   float _setpoint;
   float lastTime;
+  float _u_max;
 public:
-  PID(float kp, float ki, float kd, float setpoint)
+  PID(float kp, float ki, float kd, float setpoint, float u_max)
   {
     _kp = kp;
     _ki = ki;
     _kd = kd;
     _setpoint = setpoint;
+    _u_max = u_max;
   }
 
   float compute(float value, float dt = 0)
@@ -152,6 +163,8 @@ public:
     e2 = e1;
     e1 = e0;
     u1 = u0;
+
+    if (abs(u1) >= _u_max) u1 = _u_max * (u1 < 0 ? -1 : 1);
 
     return u1;
   }
@@ -178,7 +191,8 @@ public:
   }
 };
 
-PID *innerController;
+PID *rateControl;
+PID *speedControl;
 
 #if USE_WIFI
 #define WIFI_SSID "Diego-XPS"
@@ -311,7 +325,13 @@ void ARDUINO_ISR_ATTR controlISR(){
   portEXIT_CRITICAL(&controlTimerMux);
 
   speed += accel_value * (CONTROL_PERIOD / (double) 1000000);
-  // if (abs(speed) >= 100) speed = 100 * (speed < 0 ? -1 : 1); // set max speed
+ // if(speed >= 150){
+    //speed = 150;
+ // }
+  //if(speed <= -150){
+    //speed = -150;
+  //}
+  if (abs(speed) >= 100) speed = 100 * (speed < 0 ? -1 : 1); // set max speed
   moveAt(speed);
 
   portENTER_CRITICAL(&controlTimerMux);
@@ -340,7 +360,10 @@ void setup() {
   timerAlarmWrite(control_timer, CONTROL_PERIOD , true);
   timerAlarmEnable(control_timer);
 
-  innerController = new PID(kp, ki, kd, 0);
+  rateControl = new PID(kpr, kir, kdr, 0, ur_max);
+
+  speedSetpoint = 0;
+  speedControl = new PID(kps, kis, kds, speedSetpoint, us_max);
 
   if (!mpu.begin()) Serial.println("Failed to find MPU6050 chip");
   else 
@@ -387,16 +410,17 @@ double filteredPitch = 0;
 Cozzy_Kalman_filter_pitch Kalman(0.001, 0.003, 0.03);
 
 void loop() {
+  unsigned long now = micros();
   if(Serial.available())
   {
-    kp = Serial.parseFloat();
-    ki = Serial.parseFloat();
-    kd = Serial.parseFloat();
-    kpp = Serial.parseFloat();
+    kps = Serial.parseFloat();
+    kis = Serial.parseFloat();
+    kds = Serial.parseFloat();
+    //kpp = Serial.parseFloat();
 
     String bruh = Serial.readString(); // flush any values left
 
-    innerController->setgain(kp, ki, kd);
+    speedControl->setgain(kpr, kir, kdr);
     Serial.printf("prop term set to %f\n", kpp);
 
 
@@ -405,7 +429,7 @@ void loop() {
     delay(500);
     lastRun = micros();
   }
-
+  static unsigned long timestamp = micros();
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 
@@ -424,7 +448,7 @@ void loop() {
 
   // double trigPitch = -(acos(max(-1.0, min(1.0, gravTorque/9.81))) * 180/PI - 90);
   // double trigPitch = -(acos(max(-1.0, min(1.0,  a.acceleration.x/9.81))) * 180/PI - 90);
-  double AnglePitch = atan2(a.acceleration.x,sqrt(a.acceleration.y*a.acceleration.y+a.acceleration.z*a.acceleration.z)) * 180/PI;
+  double AnglePitch = atan2(a.acceleration.x,sqrt(a.acceleration.y*a.acceleration.y+a.acceleration.z*a.acceleration.z));
 
 
   if (filterCount < 5) trigFilter[filterCount++] = AnglePitch;
@@ -441,27 +465,33 @@ void loop() {
   // kalman_1d(KalmanAngleRoll, KalmanUncertaintyAngleRoll, RateRoll, AngleRoll);
   // KalmanAngleRoll=Kalman1DOutput[0]; 
   // KalmanUncertaintyAngleRoll=Kalman1DOutput[1];
- 
+  
+  double time_step = (double) (now - timestamp) / 1000000;
 
-  double gyroRead = -(g.gyro.y + 0.1) ;
+  double gyroRead = -(g.gyro.y);
   double KalmanPitch = Kalman.filter(gyroRead,AnglePitch);
 
-  double pitchSetpoint = 0;
-  double pitchError = pitchSetpoint - filteredPitch;
+  double pitchSetpoint = 0; //speedControl->compute(speed, time_step);
+  double pitchError = pitchSetpoint - KalmanPitch;
 
   double rateSetpoint = pitchError * kpp;
 
   // double gyroRead = g.gyro.y + 0.1;
   // double rateError = rateSetpoint - gyroXread;
+  
+  timestamp = now;
 
-
-
-  unsigned long now = micros();
-  double time_step = (double) (now - lastRun) / 1000000;
-  innerController->setSetpoint(rateSetpoint);
-  double reqAccel = (double)innerController->compute(gyroRead, time_step);
-  lastRun = micros();
+  rateControl->setSetpoint(rateSetpoint);
+  float reqAccel = rateControl->compute(gyroRead - Kalman.get_bias(), time_step);
+  if (abs(reqAccel) >= 5000) reqAccel = 5000 * (reqAccel < 0 ? -1 : 1);
   setAcceleration(reqAccel);
+  /*float error = rateSetpoint - gyroRead;
+  float de = -(error - last_value)/time_step;
+  integral_error += ki * error * time_step;;
+  last_value = error;
+  float reqAccel = kp * error + integral_error + kd * de;
+  setAcceleration(reqAccel);*/
+
 
 
   // // speed += reqAccel * (now - lastRun) * 0.001;
@@ -469,7 +499,7 @@ void loop() {
   // // now = micros();
   // // double pitchRateComp = (trigPitch - prevPitch) / (now - lastRun);
 
-  if (loopCount++%25) Serial.printf("Speed:%f,Acceleration:%f,rateSetpoint:%f,AngleMeasure:%f,AngleFilter:%f,Kalman:%f,PitchRateMeasure:%f,AccX:%f,TimeStep:%f\n", getSpeed(), reqAccel, rateSetpoint, AnglePitch, filteredPitch, KalmanPitch, gyroRead, a.acceleration.x,time_step);
+  if (loopCount++%25) Serial.printf("Speed:%f,Acceleration:%f,rateSetpoint:%f,pitchSetpoint:%f,AngleFilter:%f,Kalman:%f,PitchRateMeasure:%f,TimeStep:%f\n", getSpeed(), reqAccel, rateSetpoint, pitchSetpoint, filteredPitch, KalmanPitch, gyroRead,time_step);
 
   // // moveAt(speed);
   // prevPitch = trigPitch;
