@@ -22,9 +22,7 @@ portMUX_TYPE stepTimerMux = portMUX_INITIALIZER_UNLOCKED;
 
 hw_timer_t *control_timer = NULL;
 portMUX_TYPE controlTimerMux = portMUX_INITIALIZER_UNLOCKED;
-
-unsigned long lastRun;
-unsigned int filterpos = 0;
+#define CONTROL_PERIOD 50 // in microseconds
 
 // ISR TEP HANDLING
 volatile bool isStep = 0;
@@ -32,6 +30,71 @@ volatile int ISRstepCounter = 0;
 volatile int ISRdegreeStepCount = 0;
 volatile bool ISRdegreeControl = 0;
 volatile long int ISRcontrolStepCounter = 0;
+
+// control ISR stuff
+volatile double ISRmotorAccel = 0;
+volatile double ISRmotorSpeed = 0;
+
+// KALMAN FILTERING
+  float Q_angle  =  0.001;   //0.005
+  float Q_gyro   =  0.003;  //0.0003
+  float R_angle  =  0.03;     //0.008
+
+  float x_angle = 0, x_bias = 0;
+  float P_00 = 1000, P_01 = 0, P_10 = 0, P_11 = 1000;	
+  float  y, S_var;
+  float K_0, K_1;
+class Cozzy_Kalman_filter_pitch {
+    private:
+        unsigned long T;
+        double theta[2];
+        double P[2][2];
+        double y;
+        double K[2];
+        double Q[2];
+        double R;
+        double S;
+    public:
+        Cozzy_Kalman_filter_pitch(double Q_theta,double Q_theta_rate,double R_variance) {
+            theta[0] = 0;
+            theta[1] = 0; 
+            P[0][0] = 1000;
+            P[0][1] = 0;
+            P[1][0] = 0;
+            P[1][1] = 1000;
+            K[0] = 0;
+            K[1] = 0;
+            R = R_variance;
+            Q[0] = Q_theta;
+            Q[1] = Q_theta_rate;
+        }
+        void init(){
+            T = micros();
+        }
+        double filter(double angle_rate,double pitch){
+            double delta_t = double(micros() - T)/1000000;
+            T = micros();
+            theta[0] += delta_t*(angle_rate-theta[1]);
+            P[0][0] += delta_t*(delta_t*P[1][1]-P[0][1]-P[1][0]+Q[0]);
+            P[0][1] -= delta_t*P[1][1];
+            P[1][0] -= delta_t*P[1][1];
+            P[1][1] += delta_t*Q[1];
+            y = pitch - theta[0];
+            S = P[0][0] + R;
+            K[0] = P[0][0]/S;
+            K[1] = P[1][0]/S;
+            theta[0] += K[0]*y; 
+            theta[1] += K[1]*y; 
+            P[1][0] -= K[1]*P[0][0];
+            P[1][1] -= K[1]*P[0][1];
+            P[0][0] -= K[0]*P[0][0];
+            P[0][1] -= K[0]*P[0][1];
+            return theta[0];
+        }
+        double get_bias(){
+          return theta[1];
+        }
+};
 
 // HEADING AND DISTANCE TRACKING
 enum direction 
@@ -70,17 +133,17 @@ public:
 
   float compute(float value, float dt = 0)
   {
-    if (dt == 0)
-    {
-      if (lastTime == 0)
-      {
-        lastTime = millis();
-        // dt = lastTime; // use 0 for this time
-      }
-      unsigned long now = millis();
-      dt = lastTime - now;
-      lastTime = now;
-    }
+    // if (dt == 0)
+    // {
+    //   if (lastTime == 0)
+    //   {
+    //     lastTime = micros();
+    //     // dt = lastTime; // use 0 for this time
+    //   }
+    //   unsigned long now = micros();
+    //   dt = lastTime - now;
+    //   lastTime = now;
+    // }
 
     e0 = _setpoint - value;
     float delta_u = _kp*(e0 - e1) + _ki*dt*e0 + _kd/dt*(e0 - 2*e1 + e2);
@@ -140,6 +203,7 @@ typedef struct {
 
 
 void setDelay(long int delay){
+  if ( delay > 10) { // hard limit on how small the delay can be
   if (delay == 0 && timerAlarmEnabled(step_timer)){
     timerAlarmDisable(step_timer);
   } else {
@@ -147,11 +211,12 @@ void setDelay(long int delay){
     if(!timerAlarmEnabled(step_timer)){
       timerAlarmEnable(step_timer);
     }
+  } 
   }
 }
 
 void setRPM(double rpm){
-  if (rpm > 150) rpm = 150; // do not exceed
+  // if (rpm > 150) rpm = 150; // do not exceed
   setDelay((1e6 * 60) / (abs(rpm) * STEP_PER_REVOLUTION));
 }
 
@@ -195,90 +260,30 @@ int getSteps(){
   return steps;
 }
 
+double getSpeed(){
+  double speed = 0;
+  portENTER_CRITICAL(&controlTimerMux);
+  speed = ISRmotorSpeed;
+  portEXIT_CRITICAL(&controlTimerMux);
+  return speed;
+}
+
 void resetSteps(){
   portENTER_CRITICAL(&stepTimerMux);
   ISRstepCounter = 0;
   portEXIT_CRITICAL(&stepTimerMux);
 }
 
-void POSTmotorVals(void * payload) {
-  #if USE_WIFI
-  Serial.println("[POST motor pos] Starting task");
-  motorParams *data = (motorParams*)payload; // dodgy pointer casting
-
-  String msgType = "";
-  if (data->type == 0) msgType = "angle";
-  else if (data->type == 1) msgType = "distance";
-  String JSONdata = "{\"type\":\"" + msgType + "\",\"value\":" + String(data->val) + "}";
-  
-  http.begin(motorEndPoint);
-  http.addHeader("Content-Type", "application/json");
-  int httpResponseCode = http.POST(JSONdata);
-
-  Serial.print("[POST motor pos]");
-  if (httpResponseCode > 0)
-  {
-    String response = http.getString();
-    Serial.print(" POST Response code: " + String(httpResponseCode));
-    Serial.println("Response: " + response);
-  }
-  else
-  {
-    Serial.println(" Error sending POST request");
-  }
-  http.end();
-
-  // delete parameters to avoid mem leak
-  free(data);
-
-  vTaskDelete(NULL);
-  #else
-  Serial.println("Cannot POST: WiFi deactivated!");
-  #endif
+void setAcceleration(const double &accel){
+  portENTER_CRITICAL(&controlTimerMux);
+  ISRmotorAccel = accel;
+  portEXIT_CRITICAL(&controlTimerMux);
 }
 
-void handleNewDirection(direction prevD){
-  int steps = getSteps();
-  resetSteps();
-
-  // allocate on heap so it can be used to xcreatetask
-  motorParams *payload = new motorParams();
-  payload->type = -1;
-
-  if (prevD == FW || prevD == BCK){
-    double dist = ( double(steps) / STEP_PER_REVOLUTION ) * ( 2 * PI * WHEEL_RADIUS);
-    if(prevD == FW) Serial.printf("FW by %.2f cm\n", dist);
-    else Serial.printf("BCK by %.2f cm\n", dist);
-
-    payload->type = 1;
-    payload->val = (prevD == FW ? dist : -dist);
-    // payload = "{\"type\":\"distance\",\"value\":" + (prevD == FW ? String(dist) : String(-dist)) + "}";
-  } else if (prevD == L || prevD == R) {
-    double angle = steps * (asin((2 * PI * WHEEL_RADIUS) / (WHEEL_CENTRE_OFFSET * STEP_PER_REVOLUTION)) * 180/PI);  // thanks diego
-    if(prevD == L) Serial.printf("Left by %.2f degrees\n", angle);
-    else Serial.printf("Right by %.2f degrees\n", angle);
-
-
-    payload->type = 0;
-    payload->val = (prevD == R ? angle : -angle);
-    // payload = "{\"type\":\"angle\",\"value\":" + (prevD == R ? String(angle) : String(-angle)) + "}";
-  } else {
-    // Serial.printf("Remained still, %i steps\n", steps);
-  }
-
-  #if USE_WIFI
-  if (payload->type != -1){
-    Serial.println("Starting POST task");
-    xTaskCreate(
-      POSTmotorVals,
-      "Send movement info",
-      2000,
-      (void*) payload,
-      1,
-      NULL
-    );    
-  }
-  #endif
+void setSpeed(const double &speed){
+  portENTER_CRITICAL(&controlTimerMux);
+  ISRmotorSpeed = speed;
+  portEXIT_CRITICAL(&controlTimerMux);
 }
 
 void ARDUINO_ISR_ATTR stepISR(){
@@ -297,25 +302,21 @@ void ARDUINO_ISR_ATTR stepISR(){
   }
 }
 
+
 void ARDUINO_ISR_ATTR controlISR(){
-  int32_t ISRstepDiff = 0;
-  portENTER_CRITICAL(&stepTimerMux);
-  ISRstepDiff = ISRstepCounter - ISRcontrolStepCounter;
-  ISRcontrolStepCounter = ISRstepCounter;
-  portEXIT_CRITICAL(&stepTimerMux);
+  double accel_value = 0, speed = 0;
+  portENTER_CRITICAL(&controlTimerMux);
+  accel_value = ISRmotorAccel;
+  speed = ISRmotorSpeed;
+  portEXIT_CRITICAL(&controlTimerMux);
 
+  speed += accel_value * (CONTROL_PERIOD / (double) 1000000);
+  // if (abs(speed) >= 100) speed = 100 * (speed < 0 ? -1 : 1); // set max speed
+  moveAt(speed);
 
-  portENTER_CRITICAL_ISR(&controlTimerMux);
-  if(ISRdegreeControl) {
-    if(ISRdegreeStepCount > 0) {
-      ISRdegreeStepCount -= ISRstepDiff;
-    } else {
-      ISRdegreeStepCount = 0;
-      setRPM(0);
-      ISRdegreeControl = 0;
-    }
-  }
-  portEXIT_CRITICAL_ISR(&controlTimerMux);
+  portENTER_CRITICAL(&controlTimerMux);
+  ISRmotorSpeed = speed;
+  portEXIT_CRITICAL(&controlTimerMux);
 }
 
 void setup() {
@@ -329,14 +330,14 @@ void setup() {
 
   // set some direction
   digitalWrite(DIRRpin, HIGH);
-  digitalWrite(DIRLpin, HIGH);
+  digitalWrite(DIRLpin, HIGH  );
 
-  step_timer = timerBegin(0, 80, true);
+  step_timer = timerBegin(3, 80, true);
   timerAttachInterrupt(step_timer, &stepISR, true);
 
-  control_timer = timerBegin(1, 80, true);
+  control_timer = timerBegin(2, 80, true);
   timerAttachInterrupt(control_timer, &controlISR, true);
-  timerAlarmWrite(control_timer, 1000 , true);
+  timerAlarmWrite(control_timer, CONTROL_PERIOD , true);
   timerAlarmEnable(control_timer);
 
   innerController = new PID(kp, ki, kd, 0);
@@ -345,12 +346,14 @@ void setup() {
   else 
   {
     Serial.println("MPU6050 Found!");
-    mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
-    mpu.setGyroRange(MPU6050_RANGE_500_DEG);
-    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+    mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
+    mpu.setGyroRange(MPU6050_RANGE_250_DEG);
+    mpu.setFilterBandwidth(MPU6050_BAND_184_HZ);
+    // mpu.setI2CBypass(true);
   }
 
-  lastRun = millis();
+  
+  // lastRun = millis();
 
   // Wifi Setup
   #if USE_WIFI
@@ -373,6 +376,16 @@ long int stepCounter = 0;
 double speed = 0;
 direction dir = S;
 
+unsigned long lastRun;
+double prevPitch = 0;
+
+unsigned int loopCount = 0;
+unsigned int filterCount = 0;
+double trigFilter[5];
+double filteredPitch = 0;
+
+Cozzy_Kalman_filter_pitch Kalman(0.001, 0.003, 0.03);
+
 void loop() {
   if(Serial.available())
   {
@@ -381,45 +394,87 @@ void loop() {
     kd = Serial.parseFloat();
     kpp = Serial.parseFloat();
 
-    innerController->setgain(kp, ki/1000, kd);
+    String bruh = Serial.readString(); // flush any values left
+
+    innerController->setgain(kp, ki, kd);
     Serial.printf("prop term set to %f\n", kpp);
-    speed = 0;
-    lastRun = millis();
+
+
+    setSpeed(0);
+    setAcceleration(0);
+    delay(500);
+    lastRun = micros();
   }
 
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 
-  double filter0[5];
+  // double filter0[5];
 
-  filter0[filterpos++%5] = a.acceleration.x;
-  double gravTorque = 0;
-  for(int i = 0; i < 5; i++)
-  { 
-    gravTorque += 0.2 * filter0[i];
+  // filter0[filterpos++%5] = a.acceleration.x;
+  // if (filterpos < 5) filter0[filterpos++] = a.acceleration.x;
+  // else filter0[filterpos = 0] = a.acceleration.x;
+
+  // double gravTorque = 0;
+  // for(int i = 0; i < 5; i++)
+  // { 
+  //   gravTorque += filter0[i];
+  // }
+  // gravTorque /= 5;
+
+  // double trigPitch = -(acos(max(-1.0, min(1.0, gravTorque/9.81))) * 180/PI - 90);
+  // double trigPitch = -(acos(max(-1.0, min(1.0,  a.acceleration.x/9.81))) * 180/PI - 90);
+  double AnglePitch = atan2(a.acceleration.x,sqrt(a.acceleration.y*a.acceleration.y+a.acceleration.z*a.acceleration.z)) * 180/PI;
+
+
+  if (filterCount < 5) trigFilter[filterCount++] = AnglePitch;
+  else trigFilter[filterCount = 0] = AnglePitch;
+
+  filteredPitch = 0;
+  for(int i = 0; i < 5; i++){
+    filteredPitch += trigFilter[i];
   }
 
-  double trigPitch = -(acos(max(-1.0, min(1.0, gravTorque/9.81))) * 180/PI - 90);
+  filteredPitch /= 5;
 
 
-  double pitchSetpoint = -2;
-  double pitchError = pitchSetpoint - trigPitch;
+  // kalman_1d(KalmanAngleRoll, KalmanUncertaintyAngleRoll, RateRoll, AngleRoll);
+  // KalmanAngleRoll=Kalman1DOutput[0]; 
+  // KalmanUncertaintyAngleRoll=Kalman1DOutput[1];
+ 
+
+  double gyroRead = -(g.gyro.y + 0.1) ;
+  double KalmanPitch = Kalman.filter(gyroRead,AnglePitch);
+
+  double pitchSetpoint = 0;
+  double pitchError = pitchSetpoint - filteredPitch;
 
   double rateSetpoint = pitchError * kpp;
 
-  double rateError = rateSetpoint - g.gyro.x;
+  // double gyroRead = g.gyro.y + 0.1;
+  // double rateError = rateSetpoint - gyroXread;
 
+
+
+  unsigned long now = micros();
+  double time_step = (double) (now - lastRun) / 1000000;
   innerController->setSetpoint(rateSetpoint);
-  double reqAccel = (double)innerController->compute(g.gyro.x) * 0.001;
+  double reqAccel = (double)innerController->compute(gyroRead, time_step);
+  lastRun = micros();
+  setAcceleration(reqAccel);
 
-  unsigned long now = millis();
 
-  speed += reqAccel * (now - lastRun) * 0.001;
+  // // speed += reqAccel * (now - lastRun) * 0.001;
 
-  Serial.printf("Speed: %f\n", speed);
+  // // now = micros();
+  // // double pitchRateComp = (trigPitch - prevPitch) / (now - lastRun);
 
-  moveAt(speed);
-  lastRun = millis();
+  if (loopCount++%25) Serial.printf("Speed:%f,Acceleration:%f,rateSetpoint:%f,AngleMeasure:%f,AngleFilter:%f,Kalman:%f,PitchRateMeasure:%f,AccX:%f,TimeStep:%f\n", getSpeed(), reqAccel, rateSetpoint, AnglePitch, filteredPitch, KalmanPitch, gyroRead, a.acceleration.x,time_step);
 
-  delay(5);
+  // // moveAt(speed);
+  // prevPitch = trigPitch;
+
+
+  // Serial.printf("Speed:%f\n", getSpeed());
+  // delay(1);
 }
