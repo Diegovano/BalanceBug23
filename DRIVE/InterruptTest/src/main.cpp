@@ -1,7 +1,10 @@
+#pragma once
 #include <Arduino.h>
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+
+#include "MazeLogic.cpp"
 
 #define USE_WIFI false
 #define STEP_PER_REVOLUTION 3200
@@ -236,26 +239,34 @@ void ARDUINO_ISR_ATTR controlISR(){
   portEXIT_CRITICAL_ISR(&controlTimerMux);
 }
 
+// R , FR , F , FL , 
+const int LDRpins[5] = {4, 2, 15, 12, 13};
+MazeLogic labyrinthController(LDRpins);
+
 void setup() {
   Serial.begin(115200);
   Serial.println("starting!");
 
-  pinMode(STPRpin, OUTPUT);
-  pinMode(STPLpin, OUTPUT);
-  pinMode(DIRRpin, OUTPUT);
-  pinMode(DIRLpin, OUTPUT);
+  labyrinthController.init();
 
-  // set some direction
-  digitalWrite(DIRRpin, HIGH);
-  digitalWrite(DIRLpin, HIGH);
+  // pinMode(STPRpin, OUTPUT);
+  // pinMode(STPLpin, OUTPUT);
+  // pinMode(DIRRpin, OUTPUT);
+  // pinMode(DIRLpin, OUTPUT);
 
-  step_timer = timerBegin(0, 80, true);
-  timerAttachInterrupt(step_timer, &stepISR, true);
+  // // set some direction
+  // digitalWrite(DIRRpin, HIGH);
+  // digitalWrite(DIRLpin, HIGH);
 
-  control_timer = timerBegin(1, 80, true);
-  timerAttachInterrupt(control_timer, &controlISR, true);
-  timerAlarmWrite(control_timer, 1000 , true);
-  timerAlarmEnable(control_timer);
+  // step_timer = timerBegin(0, 80, true);
+  // timerAttachInterrupt(step_timer, &stepISR, true);
+
+  // control_timer = timerBegin(1, 80, true);
+  // timerAttachInterrupt(control_timer, &controlISR, true);
+  // timerAlarmWrite(control_timer, 1000 , true);
+  // timerAlarmEnable(control_timer);
+
+
 
   // Wifi Setup
   #if USE_WIFI
@@ -279,52 +290,53 @@ int speed = 10;
 direction dir = S;
 
 void loop() {
-  if(Serial.available()){
-    handleNewDirection(dir);
-    switch(Serial.read()){
-      case 'w': {
-        dir = FW;
-        moveAt(speed);
-        break;
-      }
-      case 's': {
-        dir = BCK;
-        moveAt(-speed);
-        break;
-      }
-      case 'a': {
-        dir = L;
-        turnAt(-speed);
-        break;
-      }
-      case 'd': {
-        dir = R;
-        turnAt(speed);
-        break;
-      }
-      case ' ': {
-        dir = S;
-        moveAt(0);
-        break;
-      }
-      case ('t'): {
-        Serial.println("Insert turning amount");
-        double angle = Serial.parseFloat();
-        turnBy(angle, 30);
-        Serial.printf("Turn by %.2f degree\n", angle);
-        break; }
-      case ('r'): {
-        Serial.println("Set rpm amount");
-        double rpm = Serial.parseFloat();
-        moveAt(rpm);
-        Serial.printf("Set Speed to: %.2f\n", rpm);
-        break; }
-      default:
-        Serial.println("Option invalid");
-        dir = S;
-        moveAt(0);
-    }
-  } 
+  // if(Serial.available()){
+  //   handleNewDirection(dir);
+  //   switch(Serial.read()){
+  //     case 'w': {
+  //       dir = FW;
+  //       moveAt(speed);
+  //       break;
+  //     }
+  //     case 's': {
+  //       dir = BCK;
+  //       moveAt(-speed);
+  //       break;
+  //     }
+  //     case 'a': {
+  //       dir = L;
+  //       turnAt(-speed);
+  //       break;
+  //     }
+  //     case 'd': {
+  //       dir = R;
+  //       turnAt(speed);
+  //       break;
+  //     }
+  //     case ' ': {
+  //       dir = S;
+  //       moveAt(0);
+  //       break;
+  //     }
+  //     case ('t'): {
+  //       Serial.println("Insert turning amount");
+  //       double angle = Serial.parseFloat();
+  //       turnBy(angle, 30);
+  //       Serial.printf("Turn by %.2f degree\n", angle);
+  //       break; }
+  //     case ('r'): {
+  //       Serial.println("Set rpm amount");
+  //       double rpm = Serial.parseFloat();
+  //       moveAt(rpm);
+  //       Serial.printf("Set Speed to: %.2f\n", rpm);
+  //       break; }
+  //     default:
+  //       Serial.println("Option invalid");
+  //       dir = S;
+  //       moveAt(0);
+  //   }
+  // } 
 
-  delay(50);
+  labyrinthController.printLDRs();
+  delay(200);
 }
