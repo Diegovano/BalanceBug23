@@ -3,8 +3,12 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <Adafruit_MPU6050.h>
+#include "WebSocketsClient.h"
 
-#define USE_WIFI false
+#define USE_SERIAL Serial
+
+#define USE_WIFI true
+#define WEBSOCKET true
 #define STEP_PER_REVOLUTION 3200
 
 const float WHEEL_RADIUS = 3.5;
@@ -15,6 +19,8 @@ const int STPRpin = 25;
 const int DIRRpin = 26;
 const int STPLpin = 32;
 const int DIRLpin = 33;
+
+WebSocketsClient webSocket;
 
 // TIMER DEFINITIONS
 hw_timer_t *step_timer = NULL;
@@ -197,9 +203,8 @@ PID *speedControl;
 #if USE_WIFI
 #define WIFI_SSID "Diego-XPS"
 #define WIFI_PASSWORD "helloGitHub!"
-#define SERVER_IP "54.82.44.87"
 
-const String SERVER_IP = "192.168.0.99";
+const String SERVER_IP = "54.82.44.87";
 const String HTTP_PORT = "3001";
 
 const String motorEndPoint = "http://" + SERVER_IP + ":" + HTTP_PORT + "/api/motor";
@@ -339,6 +344,40 @@ void ARDUINO_ISR_ATTR controlISR(){
   portEXIT_CRITICAL(&controlTimerMux);
 }
 
+void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+
+	switch(type) {
+		case WStype_DISCONNECTED:
+			USE_SERIAL.printf("[WSc] Disconnected!\n");
+			break;
+		case WStype_CONNECTED:
+			USE_SERIAL.printf("[WSc] Connected to url: %s\n", payload);
+
+			// send message to server when Connected
+			webSocket.sendTXT("Connected");
+			break;
+		case WStype_TEXT:
+			USE_SERIAL.printf("[WSc] get text: %s\n", payload);
+
+			// send message to server
+			// webSocket.sendTXT("message here");
+			break;
+		case WStype_BIN:
+			USE_SERIAL.printf("[WSc] get binary length: %u\n", length);
+
+			// send data to server
+			// webSocket.sendBIN(payload, length);
+			break;
+		case WStype_ERROR:			
+		case WStype_FRAGMENT_TEXT_START:
+		case WStype_FRAGMENT_BIN_START:
+		case WStype_FRAGMENT:
+		case WStype_FRAGMENT_FIN:
+			break;
+	}
+
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("starting!");
@@ -392,6 +431,18 @@ void setup() {
   Serial.print("Connected to WiFi as");
   Serial.println(WiFi.localIP());
   digitalWrite(LED_BUILTIN, HIGH);
+
+  #endif
+  #if WEBSOCKET
+  // WEBSOCKET
+
+  webSocket.begin("127.0.0.1", 8080, "/");
+
+  webSocket.onEvent(webSocketEvent);
+
+  webSocket.setReconnectInterval(5000);
+
+
   #endif
 }
 
