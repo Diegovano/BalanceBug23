@@ -3,9 +3,11 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <Adafruit_MPU6050.h>
-#include "WebSocketsClient.h"
+#include <ArduinoWebsockets.h>
 
-#define USE_SERIAL Serial
+using namespace websockets;
+
+WebsocketsClient client;
 
 #define USE_WIFI true
 #define WEBSOCKET true
@@ -19,8 +21,6 @@ const int STPRpin = 25;
 const int DIRRpin = 26;
 const int STPLpin = 32;
 const int DIRLpin = 33;
-
-WebSocketsClient webSocket;
 
 // TIMER DEFINITIONS
 hw_timer_t *step_timer = NULL;
@@ -215,13 +215,15 @@ HTTPClient http;
 // struct to pass to task scheduler for motor data
 // type is 0 for angle, 1 for distance
 // value is the double variable
-typedef struct {
+typedef struct 
+{
   int type;
   double val;
 } motorParams;
 
 
-void setDelay(long int delay){
+void setDelay(long int delay)
+{
   if ( delay > 10) { // hard limit on how small the delay can be
   if (delay == 0 && timerAlarmEnabled(step_timer)){
     timerAlarmDisable(step_timer);
@@ -234,13 +236,15 @@ void setDelay(long int delay){
   }
 }
 
-void setRPM(double rpm){
+void setRPM(double rpm)
+{
   // if (rpm > 150) rpm = 150; // do not exceed
   setDelay((1e6 * 60) / (abs(rpm) * STEP_PER_REVOLUTION));
 }
 
 // positive angle turns right, right wheel goes back and left one goes fowards
-void turnBy(double angle, double speed){
+void turnBy(double angle, double speed)
+{
   setRPM(0);
   int degreeSteps = abs(angle) / (asin((2 * PI * WHEEL_RADIUS) / (WHEEL_CENTRE_OFFSET * 3200)) * 180/PI); // assume 16th steps
 
@@ -255,23 +259,27 @@ void turnBy(double angle, double speed){
 }
 
 // set the direction, 1 forward 0 back ?
-void setDir(bool direction){
+void setDir(bool direction)
+{
   digitalWrite(DIRRpin, direction);
   digitalWrite(DIRLpin, direction);
 }
 
-void moveAt(double speed){
+void moveAt(double speed)
+{
   setRPM(speed);
   setDir(speed > 0);
 }
 
-void turnAt(double speed){
+void turnAt(double speed)
+{
   setRPM(speed);
   digitalWrite(DIRRpin, speed < 0);
   digitalWrite(DIRLpin, speed > 0);
 }
 
-int getSteps(){
+int getSteps()
+{
   uint32_t steps = 0;
   portENTER_CRITICAL(&stepTimerMux);
   steps = ISRstepCounter;
@@ -279,7 +287,8 @@ int getSteps(){
   return steps;
 }
 
-double getSpeed(){
+double getSpeed()
+{
   double speed = 0;
   portENTER_CRITICAL(&controlTimerMux);
   speed = ISRmotorSpeed;
@@ -287,25 +296,29 @@ double getSpeed(){
   return speed;
 }
 
-void resetSteps(){
+void resetSteps()
+{
   portENTER_CRITICAL(&stepTimerMux);
   ISRstepCounter = 0;
   portEXIT_CRITICAL(&stepTimerMux);
 }
 
-void setAcceleration(const double &accel){
+void setAcceleration(const double &accel)
+{
   portENTER_CRITICAL(&controlTimerMux);
   ISRmotorAccel = accel;
   portEXIT_CRITICAL(&controlTimerMux);
 }
 
-void setSpeed(const double &speed){
+void setSpeed(const double &speed)
+{
   portENTER_CRITICAL(&controlTimerMux);
   ISRmotorSpeed = speed;
   portEXIT_CRITICAL(&controlTimerMux);
 }
 
-void ARDUINO_ISR_ATTR stepISR(){
+void ARDUINO_ISR_ATTR stepISR()
+{
   if (isStep) {
     digitalWrite(STPRpin, HIGH);
     digitalWrite(STPLpin, HIGH);
@@ -322,7 +335,8 @@ void ARDUINO_ISR_ATTR stepISR(){
 }
 
 
-void ARDUINO_ISR_ATTR controlISR(){
+void ARDUINO_ISR_ATTR controlISR()
+{
   double accel_value = 0, speed = 0;
   portENTER_CRITICAL(&controlTimerMux);
   accel_value = ISRmotorAccel;
@@ -342,40 +356,6 @@ void ARDUINO_ISR_ATTR controlISR(){
   portENTER_CRITICAL(&controlTimerMux);
   ISRmotorSpeed = speed;
   portEXIT_CRITICAL(&controlTimerMux);
-}
-
-void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
-
-	switch(type) {
-		case WStype_DISCONNECTED:
-			USE_SERIAL.printf("[WSc] Disconnected!\n");
-			break;
-		case WStype_CONNECTED:
-			USE_SERIAL.printf("[WSc] Connected to url: %s\n", payload);
-
-			// send message to server when Connected
-			webSocket.sendTXT("Connected");
-			break;
-		case WStype_TEXT:
-			USE_SERIAL.printf("[WSc] get text: %s\n", payload);
-
-			// send message to server
-			// webSocket.sendTXT("message here");
-			break;
-		case WStype_BIN:
-			USE_SERIAL.printf("[WSc] get binary length: %u\n", length);
-
-			// send data to server
-			// webSocket.sendBIN(payload, length);
-			break;
-		case WStype_ERROR:			
-		case WStype_FRAGMENT_TEXT_START:
-		case WStype_FRAGMENT_BIN_START:
-		case WStype_FRAGMENT:
-		case WStype_FRAGMENT_FIN:
-			break;
-	}
-
 }
 
 void setup() {
@@ -432,17 +412,30 @@ void setup() {
   Serial.println(WiFi.localIP());
   digitalWrite(LED_BUILTIN, HIGH);
 
-  #endif
   #if WEBSOCKET
-  // WEBSOCKET
 
-  webSocket.begin("127.0.0.1", 8080, "/");
+  Serial.println("Connecting to WebSocket");
 
-  webSocket.onEvent(webSocketEvent);
-
-  webSocket.setReconnectInterval(5000);
+  String URL("ws://192.168.0.141:8080/");
 
 
+  while(!client.available())
+  {
+    client.connect(URL);
+    Serial.print('.');
+    delay(500);
+  }
+  Serial.print("\nConnected to WebSocket!");
+
+  client.onMessage([&](WebsocketsMessage message)
+  {
+    Serial.print("Got Message: ");
+    Serial.println(message.data());
+  });
+
+  client.send("Hiiii!");
+
+  #endif
   #endif
 }
 
@@ -462,6 +455,7 @@ Cozzy_Kalman_filter_pitch Kalman(0.001, 0.003, 0.03);
 
 void loop() {
   unsigned long now = micros();
+  client.poll();
   if(Serial.available())
   {
     kps = Serial.parseFloat();
