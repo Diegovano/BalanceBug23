@@ -22,6 +22,8 @@ const int DIRRpin = 26;
 const int STPLpin = 32;
 const int DIRLpin = 33;
 
+bool MPUAvail = false;
+
 // TIMER DEFINITIONS
 hw_timer_t *step_timer = NULL;
 portMUX_TYPE stepTimerMux = portMUX_INITIALIZER_UNLOCKED;
@@ -391,6 +393,8 @@ void setup() {
     mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
     mpu.setGyroRange(MPU6050_RANGE_250_DEG);
     mpu.setFilterBandwidth(MPU6050_BAND_184_HZ);
+
+    MPUAvail = true;
     // mpu.setI2CBypass(true);
   }
 
@@ -476,7 +480,7 @@ void loop() {
   }
   static unsigned long timestamp = micros();
   sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
+  if(MPUAvail)mpu.getEvent(&a, &g, &temp);
 
   // double filter0[5];
 
@@ -544,7 +548,7 @@ void loop() {
   // // now = micros();
   // // double pitchRateComp = (trigPitch - prevPitch) / (now - lastRun);
 
-  if (loopCount++%25) Serial.printf("Speed:%f,Acceleration:%f,rateSetpoint:%f,pitchSetpoint:%f,AngleFilter:%f,Kalman:%f,PitchRateMeasure:%f,TimeStep:%f\n", getSpeed(), reqAccel, rateSetpoint, pitchSetpoint, filteredPitch, KalmanPitch, gyroRead,time_step);
+  // if (loopCount++%25) Serial.printf("Speed:%f,Acceleration:%f,rateSetpoint:%f,pitchSetpoint:%f,AngleFilter:%f,Kalman:%f,PitchRateMeasure:%f,TimeStep:%f\n", getSpeed(), reqAccel, rateSetpoint, pitchSetpoint, filteredPitch, KalmanPitch, gyroRead,time_step);
 
   // // moveAt(speed);
   // prevPitch = trigPitch;
