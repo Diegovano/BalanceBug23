@@ -4,13 +4,15 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 
-#include "MazeLogic.cpp"
 
-#define USE_WIFI false
+#define USE_WIFI true
 #define STEP_PER_REVOLUTION 3200
 
 const float WHEEL_RADIUS = 3.5;
 const float WHEEL_CENTRE_OFFSET = 9.5;
+
+// include later so constants are included (very dodgy)
+#include "MazeLogic.cpp"
 
 // PIN DEFINITIONS
 const int STPRpin = 25;
@@ -33,32 +35,20 @@ volatile int ISRdegreeStepCount = 0;
 volatile bool ISRdegreeControl = 0;
 volatile long int ISRcontrolStepCounter = 0;
 
-// HEADING AND DISTANCE TRACKING
-enum direction 
-{
-  FW, BCK, L, R, S
-};
-
 #if USE_WIFI
 #define WIFI_SSID "iPhone di Luigi"
 #define WIFI_PASSWORD "chungusVBD"
-#define SERVER_IP "54.82.44.87"
+// #define SERVER_IP "54.82.44.87"
 
 const String SERVER_IP = "192.168.0.99";
 const String HTTP_PORT = "3001";
 
 const String motorEndPoint = "http://" + SERVER_IP + ":" + HTTP_PORT + "/api/motor";
 
-HTTPClient http;
+// HTTPClient http;
 #endif
 
-// struct to pass to task scheduler for motor data
-// type is 0 for angle, 1 for distance
-// value is the double variable
-typedef struct {
-  int type;
-  double val;
-} motorParams;
+
 
 
 void setDelay(long int delay){
@@ -122,86 +112,6 @@ void resetSteps(){
   portEXIT_CRITICAL(&stepTimerMux);
 }
 
-void POSTmotorVals(void * payload) {
-  #if USE_WIFI
-  Serial.println("[POST motor pos] Starting task");
-  motorParams *data = (motorParams*)payload; // dodgy pointer casting
-
-  String msgType = "";
-  if (data->type == 0) msgType = "angle";
-  else if (data->type == 1) msgType = "distance";
-  String JSONdata = "{\"type\":\"" + msgType + "\",\"value\":" + String(data->val) + "}";
-  
-  http.begin(motorEndPoint);
-  http.addHeader("Content-Type", "application/json");
-  int httpResponseCode = http.POST(JSONdata);
-
-  Serial.print("[POST motor pos]");
-  if (httpResponseCode > 0)
-  {
-    String response = http.getString();
-    Serial.print(" POST Response code: " + String(httpResponseCode));
-    Serial.println("Response: " + response);
-  }
-  else
-  {
-    Serial.println(" Error sending POST request");
-  }
-  http.end();
-
-  // delete parameters to avoid mem leak
-  free(data);
-
-  vTaskDelete(NULL);
-  #else
-  Serial.println("Cannot POST: WiFi deactivated!");
-  #endif
-}
-
-void handleNewDirection(direction prevD){
-  int steps = getSteps();
-  resetSteps();
-
-  // allocate on heap so it can be used to xcreatetask
-  motorParams *payload = new motorParams();
-  payload->type = -1;
-
-  if (prevD == FW || prevD == BCK){
-    double dist = ( double(steps) / STEP_PER_REVOLUTION ) * ( 2 * PI * WHEEL_RADIUS);
-    if(prevD == FW) Serial.printf("FW by %.2f cm\n", dist);
-    else Serial.printf("BCK by %.2f cm\n", dist);
-
-    payload->type = 1;
-    payload->val = (prevD == FW ? dist : -dist);
-    // payload = "{\"type\":\"distance\",\"value\":" + (prevD == FW ? String(dist) : String(-dist)) + "}";
-  } else if (prevD == L || prevD == R) {
-    double angle = steps * (asin((2 * PI * WHEEL_RADIUS) / (WHEEL_CENTRE_OFFSET * STEP_PER_REVOLUTION)) * 180/PI);  // thanks diego
-    if(prevD == L) Serial.printf("Left by %.2f degrees\n", angle);
-    else Serial.printf("Right by %.2f degrees\n", angle);
-
-
-    payload->type = 0;
-    payload->val = (prevD == R ? angle : -angle);
-    // payload = "{\"type\":\"angle\",\"value\":" + (prevD == R ? String(angle) : String(-angle)) + "}";
-  } else {
-    // Serial.printf("Remained still, %i steps\n", steps);
-  }
-
-  #if USE_WIFI
-  if (payload->type != -1){
-    Serial.println("Starting POST task");
-    xTaskCreate(
-      POSTmotorVals,
-      "Send movement info",
-      2000,
-      (void*) payload,
-      1,
-      NULL
-    );    
-  }
-  #endif
-}
-
 void ARDUINO_ISR_ATTR stepISR(){
   if (isStep) {
     digitalWrite(STPRpin, HIGH);
@@ -239,9 +149,12 @@ void ARDUINO_ISR_ATTR controlISR(){
   portEXIT_CRITICAL_ISR(&controlTimerMux);
 }
 
+// intialize motor controller
+WebBuffer *buffer = new WebBuffer(motorEndPoint);
+MotorController *motor = new MotorController(&getSteps, &setSpeed, &setTurnSpeed, buffer);
 // R , FR , F , FL , 
 const int LDRpins[5] = {4, 2, 15, 12, 13};
-MazeLogic labyrinthController(LDRpins);
+MazeLogic labyrinthController(LDRpins, motor);
 
 void setup() {
   Serial.begin(115200);
@@ -288,12 +201,7 @@ void loop() {
   labyrinthController.printLDRs();
   labyrinthController.update();
 
-  if (labyrinthController.getTurn()) 
-  {
-    setSpeed(labyrinthController.getSpeed());
-  } else {
-    setTurnSpeed(labyrinthController.getSpeed());
-  }
-
+  buffer->update();
+  
   delay(200);
 }
