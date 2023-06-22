@@ -17,7 +17,7 @@ const float WHEEL_CENTRE_OFFSET = 9.5;
 // PIN DEFINITIONS
 const int STPRpin = 25;
 const int DIRRpin = 26;
-const int STPLpin = 27;
+const int STPLpin = 32;
 const int DIRLpin = 33;
 
 // TIMER DEFINITIONS
@@ -35,18 +35,13 @@ volatile int ISRdegreeStepCount = 0;
 volatile bool ISRdegreeControl = 0;
 volatile long int ISRcontrolStepCounter = 0;
 
-#if USE_WIFI
 #define WIFI_SSID "iPhone di Luigi"
 #define WIFI_PASSWORD "chungusVBD"
-// #define SERVER_IP "54.82.44.87"
 
 const String SERVER_IP = "54.82.44.87";
 const String HTTP_PORT = "3001";
 
 const String motorEndPoint = "http://" + SERVER_IP + ":" + HTTP_PORT + "/api/motor";
-
-// HTTPClient http;
-#endif
 
 
 
@@ -89,13 +84,13 @@ void setDir(bool direction){
 
 void setSpeed(double speed){
   setRPM(speed);
-  setDir(speed > 0);
+  setDir(speed < 0);
 }
 
 void setTurnSpeed(double speed){
   setRPM(speed);
-  digitalWrite(DIRRpin, speed < 0);
-  digitalWrite(DIRLpin, speed > 0);
+  digitalWrite(DIRRpin, speed > 0);
+  digitalWrite(DIRLpin, speed < 0);
 }
 
 int getSteps(){
@@ -149,17 +144,24 @@ void ARDUINO_ISR_ATTR controlISR(){
   portEXIT_CRITICAL_ISR(&controlTimerMux);
 }
 
-// intialize motor controller
+// // intialize motor controller
 WebBuffer *buffer = new WebBuffer(motorEndPoint);
+
 MotorController *motor = new MotorController(&getSteps, &setSpeed, &setTurnSpeed, buffer);
-// R , FR , F , FL , L
-const int LDRpins[5] = {36, 39, 34, 35, 32};
-MazeLogic labyrinthController(LDRpins, motor);
+
+// // intialize motor controller
+// MotorController *motor = new MotorController(&getSteps, &setSpeed, &setTurnSpeed);
+
+
+// // R , FR , F , FL , 
+// const int LDRpins[5] = {4, 2, 15, 12, 13};
+// MazeLogic labyrinthController(LDRpins, motor);
 
 void setup() {
   Serial.begin(115200);
   Serial.println("starting!");
 
+  // labyrinthController.init();
 
   // MOTOR INIT
   pinMode(STPRpin, OUTPUT);
@@ -174,12 +176,12 @@ void setup() {
   step_timer = timerBegin(0, 80, true);
   timerAttachInterrupt(step_timer, &stepISR, true);
 
-  control_timer = timerBegin(1, 80, true);
-  timerAttachInterrupt(control_timer, &controlISR, true);
-  timerAlarmWrite(control_timer, 1000 , true);
-  timerAlarmEnable(control_timer);
+  setSpeed(0);
 
-  labyrinthController.init();
+  // control_timer = timerBegin(1, 80, true);
+  // timerAttachInterrupt(control_timer, &controlISR, true);
+  // timerAlarmWrite(control_timer, 1000 , true);
+  // timerAlarmEnable(control_timer);
 
   // Wifi Setup
   #if USE_WIFI
@@ -198,15 +200,7 @@ void setup() {
   #endif
 }
 
-int count = 0;
-
 void loop() {
-  if (count % 20 == 0){
-  labyrinthController.printLDRs();
-  int offsets[5];
-  labyrinthController.LDRoffsets(offsets);
-  }
-
   if(Serial.available()){
     switch(Serial.read()){
       case 'w': {
@@ -239,9 +233,15 @@ void loop() {
         motor->stop();
     }
   } 
-  // labyrinthController.update();
 
+
+  // setSpeed(10);
+  // delay(1000);
+  // setSpeed(-10);
+  // delay(1000);
+
+  // labyrinthController.printLDRs();
   buffer->update();
-  count++;
-  delay(50);
+  
+  delay(20);
 }

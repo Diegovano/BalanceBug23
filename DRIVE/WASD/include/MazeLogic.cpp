@@ -93,16 +93,9 @@ public:
   }
 };
 
-enum LDRstate 
-{
-  inRange, wallClose, away
-};
-
 class LDR
 {
   int pin;
-  LDRstate state;
-  String position;
 public:
   // empty initialiser
   LDR()
@@ -118,38 +111,9 @@ public:
     pinMode(pin, INPUT);
   }
 
-  void setState(LDRstate _state)
-  {
-    state = _state;
-  }
-
-  LDRstate getState()
-  {
-    return state;
-  }
-
   int getValue()
   { 
     return analogRead(pin);
-  }
-
-  void setPos(String _pos)
-  {
-    position = _pos;
-  }
-
-  String getPos()
-  {
-    return position;
-  }
-
-  String print()
-  {
-    String val;
-    if (state == wallClose) val = "close";
-    else if (state == inRange) val = "inRange";
-    else if (state == away) val = "away";
-    return position + " " + val;
   }
 };
 
@@ -258,106 +222,50 @@ public:
 
 class MazeLogic
 {
-  LDR sens[5]; // R, FR, F, FL, 
+  LDR R, FR, F, FL, L;
   int moveSpeed, turnSpeed;
   bool turning;
   MotorController *motor;
-  bool R, FR, F, FL, L;
-  const int minWallThresh = 2000, maxWallThresh = 800; 
+  const int minWallThresh = 2000, maxWallThresh = 3500; 
   
 public:
   MazeLogic(const int LDRpins[5], MotorController *_motor)
   {
-    for (int i = 0; i < 5; i++){
-      sens[i] = LDR(LDRpins[i]);
-    }
-    sens[0].setPos("Right");
-    sens[1].setPos("Front Right");
-    sens[2].setPos("Front");
-    sens[3].setPos("Front Left");
-    sens[4].setPos("Left");
-
+    R = LDR(LDRpins[0]);
+    FR = LDR(LDRpins[1]);
+    F = LDR(LDRpins[2]);
+    FL = LDR(LDRpins[3]);
+    L = LDR(LDRpins[4]);
     motor = _motor;
   }
 
   void init()
   {
-    for (int i = 0; i < 5; i++){
-      sens[i].init();
-    }
+    R.init();
+    FR.init();
+    F.init();
+    FL.init();
+    L.init();
     motor->stop();
   }
 
   void printLDRs()
   {
-    Serial.printf("VAL|Right:%04i,FrontRight:%04i,Front:%04i,FrontLeft:%04i,Left:%04i\n", sens[0].getValue(), sens[1].getValue(), sens[2].getValue(), sens[3].getValue(), sens[4].getValue());
-  }
-
-  void LDRoffsets()
-  {
-    int sum = 0;
-    int vals[5];
-    for (int i = 0; i < 5; i++){
-      vals[i] = sens[i].getValue();
-      sum += vals[i];
-    }
-    sum /= 5;
-
-    double offsetStd = 0;
-
-    int offsets[5];
-    for (int i = 0; i < 5; i++){
-      offsets[i] = vals[i] - sum;
-      offsetStd += pow(offsets[i],2);
-    }
-
-    offsetStd = sqrt(offsetStd); // compute standard deviation
-
-
-    Serial.printf("OFF|Right:%04i,FrontRight:%04i,Front:%04i,FrontLeft:%04i,Left:%04i,AVG:%04i,std:%f\n", offsets[0], offsets[1], offsets[2], offsets[3], offsets[4],sum, offsetStd);
-
-    if (offsetStd < 200) // if the deviation is smaller than a certain amount they are all similar values
-    {
-      Serial.println("No or all walls");
-      // either all detecting a wall (unlikely) or all not detecting a wall
-      // use the absolute average value to determine if they're all seeing a wall or not
-    } else {
-      Serial.print("Found");
-      for (int i = 0; i < 5; i++)
-      {
-        if (offsets[i] < 200)
-        {
-          sens[i].setState(away);
-        } else if (offsets[i] > 500)
-        { 
-          sens[i].setState(wallClose);
-        } else
-        {
-          sens[i].setState(inRange);
-        }
-
-        Serial.print(sens[i].print() + ",");
-      }
-
-      Serial.println("");
-    }
+    Serial.printf("Right:%i,FrontRight%i,Front%i,FrontLeft%i,Left:%i\n", R.getValue(), FR.getValue(), F.getValue(), FL.getValue(), L.getValue());
   }
 
   void update()
   {
-    LDRoffsets();
-
-    if (sens[2].getState() == wallClose) // front wall close
+    if ( R.getValue() < maxWallThresh && R.getValue() > minWallThresh )
     {
-      motor->stop();
-    } else if (sens[0].getState() == inRange && sens[4].getState() == inRange) 
-    {
-      // left and right in range
+      Serial.printf("See right wall, move forward\n");
       motor->moveFW();
-    } else if (sens[0].getState() == wallClose) 
-    {
-      // left and right in range
-      motor->moveFW();
+    } else if ( R.getValue() > maxWallThresh ) {
+      Serial.printf("Missed right wall, turn right\n");
+      motor->moveTurnRight();
+    } else {
+      Serial.printf("Too close to right wall, turn left\n");
+      motor->moveTurnLeft();
     }
   }
 };
