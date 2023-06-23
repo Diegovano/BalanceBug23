@@ -36,6 +36,10 @@ volatile int ISRdegreeStepCount = 0;
 volatile bool ISRdegreeControl = 0;
 volatile long int ISRcontrolStepCounter = 0;
 
+volatile bool ISRdistanceControl = 0;
+volatile int ISRdistanceStepCount = 0;
+
+
 #if USE_WIFI
 // #define WIFI_SSID "iPhone di Luigi"
 // #define WIFI_PASSWORD "chungusVBD"
@@ -67,7 +71,7 @@ void setRPM(double rpm){
   setDelay((1e6 * 60) / (abs(rpm) * STEP_PER_REVOLUTION));
 }
 
-// positive angle turns right, right wheel goes back and left one goes fowards
+// positive angle turns right, right wheel goes back and left one goes fowards, blocking function
 void turnBy(double angle, double speed){
   setRPM(0);
   int degreeSteps = abs(angle) / (asin((2 * PI * WHEEL_RADIUS) / (WHEEL_CENTRE_OFFSET * 3200)) * 180/PI); // assume 16th steps
@@ -80,6 +84,43 @@ void turnBy(double angle, double speed){
   ISRdegreeStepCount = degreeSteps;
   portEXIT_CRITICAL(&controlTimerMux);
   setRPM(speed);
+
+  bool isTurning = false;
+  portENTER_CRITICAL(&controlTimerMux);
+  isTurning = ISRdegreeControl;
+  portEXIT_CRITICAL(&controlTimerMux);
+  while(isTurning){
+    portENTER_CRITICAL(&controlTimerMux);
+    isTurning = ISRdegreeControl;
+    portEXIT_CRITICAL(&controlTimerMux);
+    delay(1);
+  }
+}
+
+void moveBy(double dist, double speed){
+  setRPM(0);
+
+  int steps = (abs(dist) / (2 * PI * WHEEL_RADIUS)) * STEP_PER_REVOLUTION;
+
+  digitalWrite(DIRRpin, dist > 0);
+  digitalWrite(DIRLpin, dist > 0);
+
+  portENTER_CRITICAL(&controlTimerMux);
+  ISRdistanceControl = 1;
+  ISRdistanceStepCount = steps;
+  portEXIT_CRITICAL(&controlTimerMux);
+  setRPM(speed);
+
+  bool isMoving = false;
+  portENTER_CRITICAL(&controlTimerMux);
+  isMoving = ISRdistanceControl;
+  portEXIT_CRITICAL(&controlTimerMux);
+  while(isMoving){
+      portENTER_CRITICAL(&controlTimerMux);
+  isMoving = ISRdistanceControl;
+    portEXIT_CRITICAL(&controlTimerMux);
+    delay(1);
+  }
 }
 
 // set the direction, 1 forward 0 back ?
@@ -147,12 +188,22 @@ void ARDUINO_ISR_ATTR controlISR(){
       ISRdegreeControl = 0;
     }
   }
+
+  if(ISRdistanceControl) {
+    if(ISRdistanceStepCount > 0) {
+      ISRdistanceStepCount -= ISRstepDiff;
+    } else {
+      ISRdistanceStepCount = 0;
+      setRPM(0);
+      ISRdistanceControl = 0;
+    }
+  }
   portEXIT_CRITICAL_ISR(&controlTimerMux);
 }
 
 // intialize motor controller
 WebBuffer *buffer = new WebBuffer(motorEndPoint);
-MotorController *motor = new MotorController(&getSteps, &setSpeed, &setTurnSpeed, buffer);
+MotorController *motor = new MotorController(&getSteps, &setSpeed, &setTurnSpeed, &turnBy, &moveBy, buffer);
 // R , FR , F , FL , L
 const int LDRpins[5] = {36, 39, 34, 35, 32};
 MazeLogic labyrinthController(LDRpins, motor);
@@ -243,7 +294,7 @@ void loop() {
 
   labyrinthController.update();
 
-  // buffer->update();
+  buffer->update();
   // count++;
-  delay(50);
+  delay(500);
 }

@@ -99,9 +99,7 @@ public:
 
 enum LDRstate
 {
-  inRange,
-  wallClose,
-  away
+  Wall, noWall
 };
 
 class LDR
@@ -154,11 +152,11 @@ public:
   String print()
   {
     String val;
-    if (state == wallClose)
+    if (state == Wall)
       val = "close";
-    else if (state == inRange)
-      val = "inRange";
-    else if (state == away)
+    // else if (state == inRange)
+    //   val = "inRange";
+    else if (state == noWall)
       val = "away";
     return position + " " + val;
   }
@@ -177,25 +175,27 @@ class MotorController
 {
   int (*getSteps)();
   void (*setSpeed)(double), (*setTurnSpeed)(double);
+  void (*setTurnBy)(double,double);
+  void (*setMoveBy)(double,double);
   int prevSteps;
   direction dir;
 
-  int moveSpeed = 5, turnSpeed = 5;
+  int moveSpeed = 10, turnSpeed = 10;
 
   WebBuffer *buf;
 
 public:
-  MotorController(int (*_getSteps)(), void (*_setSpeed)(double), void (*_setTurnSpeed)(double), WebBuffer *_buf)
-      : getSteps(_getSteps), setSpeed(_setSpeed), setTurnSpeed(_setTurnSpeed), buf(_buf)
+  MotorController(int (*_getSteps)(), void (*_setSpeed)(double), void (*_setTurnSpeed)(double), void (*_turnBy)(double,double), void (*_moveBy)(double,double), WebBuffer *_buf)
+      : getSteps(_getSteps), setSpeed(_setSpeed), setTurnSpeed(_setTurnSpeed), setTurnBy(_turnBy), setMoveBy(_moveBy), buf(_buf)
   {
     Serial.println("[Motor Control] Class initialised");
   }
 
-  MotorController(int (*_getSteps)(), void (*_setSpeed)(double), void (*_setTurnSpeed)(double))
-      : getSteps(_getSteps), setSpeed(_setSpeed), setTurnSpeed(_setTurnSpeed)
-  {
-    Serial.println("[Motor Control] Class initialised with no Buffer");
-  }
+  // MotorController(int (*_getSteps)(), void (*_setSpeed)(double), void (*_setTurnSpeed)(double))
+  //     : getSteps(_getSteps), setSpeed(_setSpeed), setTurnSpeed(_setTurnSpeed)
+  // {
+  //   Serial.println("[Motor Control] Class initialised with no Buffer");
+  // }
 
   void computeDistanceTravelled()
   {
@@ -277,6 +277,26 @@ public:
     dir = S;
     setSpeed(0);
   }
+
+  void turnByAngle(double angle)
+  {
+    computeDistanceTravelled();
+
+    dir = angle < 0 ? L : R;
+
+    setTurnBy(angle, turnSpeed);
+    stop();
+  }
+
+  void moveByDist(double dist)
+  {
+    computeDistanceTravelled();
+
+    dir = dist < 0 ? BCK : FW;
+
+    setMoveBy(dist, moveSpeed);
+    stop();
+  }
 };
 
 class MazeLogic
@@ -288,6 +308,13 @@ class MazeLogic
   bool R, FR, F, FL, L;
   const int minWallThresh = 2000, maxWallThresh = 800;
   int printLevel = 0;
+
+  unsigned int prevPathTime = 0;
+  bool closeLeft, closeRight;
+
+  bool pathFollow = true;
+  bool makeNode = false;
+  bool missingWalls  = -1; // 0 for right, 1 for left and 2 for both 
 
 public:
   MazeLogic(const int LDRpins[5], MotorController *_motor)
@@ -361,26 +388,31 @@ public:
       }
       for (int i = 0; i < 5; i++)
       {
-        if (offsets[i] < 200)
-        {
-          sens[i].setState(away);
+        if (i == 1 || i == 3 || i == 2){
+          if (offsets[i] < 100) // lower threshold for front edges 
+          {
+            sens[i].setState(noWall);
+          }
+          else
+          {
+            sens[i].setState(Wall);
+            if (printLevel > 1) {
+            Serial.print(sens[i].print() + ",");}
+          }   
+        } else {
+          if (offsets[i] < 200)
+          {
+            sens[i].setState(noWall);
+          }
+          else
+          {
+            sens[i].setState(Wall);
+            if (printLevel > 1) {
+            Serial.print(sens[i].print() + ",");}
+          }   
         }
-        else if (offsets[i] > 600)
-        {
-          sens[i].setState(wallClose);
-          if (printLevel > 1) {
-          Serial.print(sens[i].print() + ",");}
         }
-        else
-        {
-          sens[i].setState(inRange);
-           if (printLevel > 1) {
-          Serial.print(sens[i].print() + ",");}
-        }
-
-        
-      }
-if (printLevel > 1) {
+    if (printLevel > 1) {
       Serial.println("");}
     }
   }
@@ -388,25 +420,164 @@ if (printLevel > 1) {
   void update()
   {
     LDRoffsets();
+    unsigned int now = millis();
 
-    if (sens[2].getState() == wallClose) // front wall close
-    {
-      motor->stop();
-    }
-    else if ((sens[0].getState() == inRange && sens[4].getState() == inRange) || (sens[0].getState() == wallClose && sens[4].getState() == wallClose))
-    {
-      // left and right in range
-      motor->moveFW();
-    }
-    else if (sens[0].getState() == wallClose || sens[1].getState() != away)
-    {
-      // right too close
-      motor->moveTurnLeft();
-    }
-    else if (sens[4].getState() == wallClose || sens[3].getState() != away)
-    {
-      // left too close
-      motor->moveTurnRight();
+    LDRstate R, FR, F, FL, L;
+    R = sens[0].getState();
+    FR = sens[1].getState();
+    F = sens[2].getState();
+    FL = sens[3].getState();
+    L = sens[4].getState();
+
+    if (!makeNode && pathFollow) {
+      if (F == Wall && (FR == Wall || FL == Wall)) // front wall close
+      {
+        motor->stop();
+        Serial.println("Stopping, about to hit wall!");
+      }
+      else if (R == Wall && L == Wall) // left and right in range
+      {
+        prevPathTime = now;
+        motor->moveFW();
+        if (FR == Wall) motor->turnByAngle(-10); // turn left a bit
+        else if (FL == Wall) motor->turnByAngle(10); // turn left a bit
+
+        closeRight = FR == Wall && FL != Wall;
+        closeLeft = FL == Wall && FR != Wall;
+      }
+      else if (R == Wall && FL == Wall) // right or front-left
+      {
+        prevPathTime = now;
+        if (closeLeft) motor->moveTurnRight();
+        else motor->moveTurnLeft();
+      }
+      else if (L== Wall && FR == Wall) // left or front-right
+      {
+        prevPathTime = now;
+        if (closeRight) motor->moveTurnLeft();
+        else motor->moveTurnRight();
+      }
+      else if (now - prevPathTime < 1000) {
+        if (L == Wall) {
+          motor->moveTurnRight();
+        } else if (R == Wall) {
+          motor->moveTurnLeft();
+        } else {
+          // motor->stop();
+          LDRoffsets();
+          LDRstate StartR, StartL;
+          R = sens[0].getState();
+          FR = sens[1].getState();
+          F = sens[2].getState();
+          FL = sens[3].getState();
+          L = sens[4].getState();
+          int count = 0;
+          while(!(R == Wall && L == Wall) && count++ < 40){
+            motor->moveByDist(1);
+            LDRoffsets();
+            R = sens[0].getState();
+            FR = sens[1].getState();
+            F = sens[2].getState();
+            FL = sens[3].getState();
+            L = sens[4].getState();
+
+            if (FR == Wall) motor->turnByAngle(-10); // turn left a bit
+            else if (FL == Wall) motor->turnByAngle(10); // turn left a bit
+          }
+          Serial.println("Don't know what to do!");
+        }
+      } else {
+        Serial.println("Path timeout expired, reached node!");
+        motor->stop();
+        
+        makeNode = true;
+        pathFollow = false;
+      }
+    } else if (makeNode) {
+
+      motor->moveByDist(1);
+      LDRoffsets();
+      LDRstate StartR, StartL;
+      R = sens[0].getState();
+      FR = sens[1].getState();
+      F = sens[2].getState();
+      FL = sens[3].getState();
+      L = sens[4].getState();
+
+      StartR = R;
+      StartL = L;
+      int count = 1;
+      while(F == noWall && StartR == R && StartL == L && count < 40){
+        motor->moveByDist(1);
+        LDRoffsets();
+        R = sens[0].getState();
+        FR = sens[1].getState();
+        F = sens[2].getState();
+        FL = sens[3].getState();
+        L = sens[4].getState();
+        count++;
+      }
+
+      // find out any updates on the adjacent walls
+      motor->moveByDist(-count / 2);
+
+      if (F == Wall){
+        if (L == Wall && R == Wall) {
+          Serial.println("Dead end");
+          motor->turnByAngle(180);
+          pathFollow = true;
+        }
+        else if (L == Wall && R == noWall) {
+          Serial.println("Turn right");
+          motor->turnByAngle(90);
+          pathFollow = true;
+        }
+        else if (L == noWall && R == Wall) {
+          Serial.println("Turn Left");
+          motor->turnByAngle(-90);
+          pathFollow = true;
+        }
+        else Serial.println("T junction, ask server");
+      } else {        
+        if (L == Wall && R == Wall) Serial.println("Not possible, straight path");
+        else if (L == Wall && R == noWall) {
+          Serial.println("T junction, either straight or right");
+          motor->turnByAngle(90);
+
+          pathFollow = true;
+        }
+        else if (L == noWall && R == Wall) {
+          Serial.println("T junction, either striaght or left");
+          motor->moveByDist(10);
+
+          pathFollow = true;
+        }
+        else Serial.println("intersection, ask server");
+      }
+
+      if (pathFollow) {
+        LDRoffsets();
+        LDRstate StartR, StartL;
+        R = sens[0].getState();
+        FR = sens[1].getState();
+        F = sens[2].getState();
+        FL = sens[3].getState();
+        L = sens[4].getState();
+        int count = 0;
+        while(!(R == Wall && L == Wall) && count++ < 40){
+          motor->moveByDist(1);
+          LDRoffsets();
+          R = sens[0].getState();
+          FR = sens[1].getState();
+          F = sens[2].getState();
+          FL = sens[3].getState();
+          L = sens[4].getState();
+
+          if (FR == Wall) motor->turnByAngle(-10); // turn left a bit
+          else if (FL == Wall) motor->turnByAngle(10); // turn left a bit
+        }
+      }
+      makeNode = false;
     }
   }
 
