@@ -14,10 +14,10 @@ const float WHEEL_CENTRE_OFFSET = 9.5;
 // include later so constants are included (very dodgy)
 #include "MazeLogic.cpp"
 
-// PIN DEFINITIONS
+// MOTOR PIN ASSIGNMENTS
 const int STPRpin = 25;
 const int DIRRpin = 26;
-const int STPLpin = 32;
+const int STPLpin = 27;
 const int DIRLpin = 33;
 
 // TIMER DEFINITIONS
@@ -183,21 +183,21 @@ void setup() {
   // timerAlarmWrite(control_timer, 1000 , true);
   // timerAlarmEnable(control_timer);
 
-  // Wifi Setup
-  #if USE_WIFI
-  pinMode(LED_BUILTIN, OUTPUT);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.println("Connecting to Wi-Fi");
+  // // Wifi Setup
+  // #if USE_WIFI
+  // pinMode(LED_BUILTIN, OUTPUT);
+  // WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Serial.println("Connecting to Wi-Fi");
 
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
-    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-    delay(500);
-  }
-  Serial.print("Connected to WiFi as");
-  Serial.println(WiFi.localIP());
-  digitalWrite(LED_BUILTIN, HIGH);
-  #endif
+  // while (WiFi.status() != WL_CONNECTED) {
+  //   Serial.print(".");
+  //   digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+  //   delay(500);
+  // }
+  // Serial.print("Connected to WiFi as");
+  // Serial.println(WiFi.localIP());
+  // digitalWrite(LED_BUILTIN, HIGH);
+  // #endif
 }
 
 void loop() {
@@ -241,7 +241,7 @@ void loop() {
   // delay(1000);
 
   // labyrinthController.printLDRs();
-  buffer->update();
+  // buffer->update();
   
   delay(20);
 }

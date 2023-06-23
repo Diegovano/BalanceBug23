@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
+#include "secrets.hpp"
 #include <WiFi.h>
 #include <HTTPClient.h>
 
@@ -36,8 +37,8 @@ volatile bool ISRdegreeControl = 0;
 volatile long int ISRcontrolStepCounter = 0;
 
 #if USE_WIFI
-#define WIFI_SSID "iPhone di Luigi"
-#define WIFI_PASSWORD "chungusVBD"
+// #define WIFI_SSID "iPhone di Luigi"
+// #define WIFI_PASSWORD "chungusVBD"
 // #define SERVER_IP "54.82.44.87"
 
 const String SERVER_IP = "54.82.44.87";
@@ -180,6 +181,7 @@ void setup() {
   timerAlarmEnable(control_timer);
 
   labyrinthController.init();
+  labyrinthController.setPrintLevel(2);
 
   // Wifi Setup
   #if USE_WIFI
@@ -201,11 +203,9 @@ void setup() {
 int count = 0;
 
 void loop() {
-  if (count % 20 == 0){
-  labyrinthController.printLDRs();
-  int offsets[5];
-  labyrinthController.LDRoffsets(offsets);
-  }
+  // if (count % 20 == 0){
+  //   labyrinthController.printLDRs();
+  // }
 
   if(Serial.available()){
     switch(Serial.read()){
@@ -239,9 +239,11 @@ void loop() {
         motor->stop();
     }
   } 
-  // labyrinthController.update();
 
-  buffer->update();
-  count++;
+
+  labyrinthController.update();
+
+  // buffer->update();
+  // count++;
   delay(50);
 }
